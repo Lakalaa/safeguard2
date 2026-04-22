@@ -217,12 +217,22 @@ class BuyAlertBot {
     const chainConfig = getChainConfig(chainId);
     if (!chainConfig) return;
 
-    const { amountUsd } = event;
-    if (amountUsd < (config.minBuyUsd ?? 1)) return;
-
-    const dexData = await this.getCachedDexData(config.tokenAddress);
+    const dexData = await this.getCachedDexData(config.tokenAddress!);
     const marketCap = dexData?.marketCap ?? dexData?.fdv ?? null;
     const priceChangePct = dexData?.priceChange?.h24 ?? null;
+
+    // Reliable USD amount: prefer what the monitor computed, but fall back to
+    // tokensReceived × current price from DexScreener. This ensures correct
+    // values for EVM token→token swaps (USDC, USDT, etc.) where tx.value = 0.
+    const tokenPriceUsd = dexData?.priceUsd ? parseFloat(dexData.priceUsd) : 0;
+    const amountUsd =
+      event.amountUsd > 0.001
+        ? event.amountUsd
+        : tokenPriceUsd > 0
+          ? event.tokensReceived * tokenPriceUsd
+          : 0;
+
+    if (amountUsd < (config.minBuyUsd ?? 1)) return;
 
     const tier = getTier(amountUsd, config.tier1Min, config.tier2Min, config.tier3Min);
 
@@ -232,7 +242,7 @@ class BuyAlertBot {
         txSignature: event.signature,
         chain: chainId,
         buyerAddress: event.buyerAddress,
-        amountUsd: event.amountUsd,
+        amountUsd,
         amountNative: event.amountNative,
         nativeCurrency: chainConfig.nativeCurrency,
         tokensReceived: event.tokensReceived,
@@ -244,13 +254,18 @@ class BuyAlertBot {
 
     if (!savedAlert) return;
 
+    // Build the alert using ALL settings the user configured:
+    // - emojiPerTier + tier thresholds → circles (🟢🟢🟢🟢)
+    // - alertImageUrl → sent as photo caption
+    // - dextUrl, screenerUrl, buyUrl, trendingUrl → action link buttons
+    // These apply to every real buy, regardless of which DEX or chain it came from
     const message = buildAlertMessage({
       tokenName: config.tokenName ?? dexData?.baseToken.name ?? "Token",
       tokenSymbol: config.tokenSymbol ?? dexData?.baseToken.symbol ?? "TKN",
       chainName: chainConfig.name,
       tier,
       emojiPerTier: config.emojiPerTier,
-      amountUsd: event.amountUsd,
+      amountUsd,
       amountNative: event.amountNative,
       nativeCurrency: chainConfig.nativeCurrency,
       tokensReceived: event.tokensReceived,
@@ -267,6 +282,7 @@ class BuyAlertBot {
     });
 
     if (config.alertImageUrl) {
+      // Send image + alert text as caption
       await this.bot.sendPhoto(config.chatId, config.alertImageUrl, {
         caption: message,
         parse_mode: "HTML",
