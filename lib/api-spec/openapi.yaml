@@ -186,6 +186,25 @@ paths:
                 items:
                   $ref: "#/components/schemas/BuyAlert"
 
+  /token-info:
+    get:
+      operationId: getTokenInfo
+      tags: [bot]
+      summary: Fetch token info from DexScreener for any Solana token
+      parameters:
+        - name: address
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Token info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenInfo"
+
   /stats:
     get:
       operationId: getStats
@@ -305,6 +324,45 @@ components:
           format: date-time
       required:
         [id, buyerAddress, amountUsd, amountNative, tokensReceived, tier, sentAt]
+
+    TokenInfo:
+      type: object
+      properties:
+        address:
+          type: string
+        name:
+          type: string
+          nullable: true
+        symbol:
+          type: string
+          nullable: true
+        priceUsd:
+          type: number
+          nullable: true
+        marketCap:
+          type: number
+          nullable: true
+        priceChange24h:
+          type: number
+          nullable: true
+        liquidity:
+          type: number
+          nullable: true
+        dexscreenerUrl:
+          type: string
+          nullable: true
+        dextoolsUrl:
+          type: string
+          nullable: true
+        raydiumUrl:
+          type: string
+          nullable: true
+        pairAddress:
+          type: string
+          nullable: true
+        found:
+          type: boolean
+      required: [address, found]
 
     Stats:
       type: object

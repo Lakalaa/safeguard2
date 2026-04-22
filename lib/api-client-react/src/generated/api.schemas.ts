@@ -49,6 +49,21 @@ export interface BuyAlert {
   sentAt: string;
 }
 
+export interface TokenInfo {
+  address: string;
+  name?: string | null;
+  symbol?: string | null;
+  priceUsd?: number | null;
+  marketCap?: number | null;
+  priceChange24h?: number | null;
+  liquidity?: number | null;
+  dexscreenerUrl?: string | null;
+  dextoolsUrl?: string | null;
+  raydiumUrl?: string | null;
+  pairAddress?: string | null;
+  found: boolean;
+}
+
 export interface Stats {
   totalAlerts: number;
   totalVolumeUsd: number;
@@ -83,4 +98,8 @@ export type TestAlert200 = {
 
 export type ListAlertsParams = {
   limit?: number;
+};
+
+export type GetTokenInfoParams = {
+  address: string;
 };

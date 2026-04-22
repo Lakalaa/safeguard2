@@ -141,6 +141,28 @@ export const ListAlertsResponseItem = zod.object({
 export const ListAlertsResponse = zod.array(ListAlertsResponseItem);
 
 /**
+ * @summary Fetch token info from DexScreener for any Solana token
+ */
+export const GetTokenInfoQueryParams = zod.object({
+  address: zod.coerce.string(),
+});
+
+export const GetTokenInfoResponse = zod.object({
+  address: zod.string(),
+  name: zod.string().nullish(),
+  symbol: zod.string().nullish(),
+  priceUsd: zod.number().nullish(),
+  marketCap: zod.number().nullish(),
+  priceChange24h: zod.number().nullish(),
+  liquidity: zod.number().nullish(),
+  dexscreenerUrl: zod.string().nullish(),
+  dextoolsUrl: zod.string().nullish(),
+  raydiumUrl: zod.string().nullish(),
+  pairAddress: zod.string().nullish(),
+  found: zod.boolean(),
+});
+
+/**
  * @summary Get aggregate stats
  */
 export const GetStatsResponse = zod.object({

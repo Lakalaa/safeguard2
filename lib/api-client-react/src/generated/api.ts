@@ -20,10 +20,12 @@ import type {
   BotConfig,
   BotStatus,
   BuyAlert,
+  GetTokenInfoParams,
   HealthStatus,
   ListAlertsParams,
   Stats,
   TestAlert200,
+  TokenInfo,
   UpdateBotConfigBody,
 } from "./api.schemas";
 
@@ -672,6 +674,100 @@ export function useListAlerts<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getListAlertsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Fetch token info from DexScreener for any Solana token
+ */
+export const getGetTokenInfoUrl = (params: GetTokenInfoParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/token-info?${stringifiedParams}`
+    : `/api/token-info`;
+};
+
+export const getTokenInfo = async (
+  params: GetTokenInfoParams,
+  options?: RequestInit,
+): Promise<TokenInfo> => {
+  return customFetch<TokenInfo>(getGetTokenInfoUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetTokenInfoQueryKey = (params?: GetTokenInfoParams) => {
+  return [`/api/token-info`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetTokenInfoQueryOptions = <
+  TData = Awaited<ReturnType<typeof getTokenInfo>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetTokenInfoParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getTokenInfo>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetTokenInfoQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getTokenInfo>>> = ({
+    signal,
+  }) => getTokenInfo(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getTokenInfo>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetTokenInfoQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getTokenInfo>>
+>;
+export type GetTokenInfoQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Fetch token info from DexScreener for any Solana token
+ */
+
+export function useGetTokenInfo<
+  TData = Awaited<ReturnType<typeof getTokenInfo>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetTokenInfoParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getTokenInfo>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetTokenInfoQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
