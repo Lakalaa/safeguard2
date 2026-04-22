@@ -4,6 +4,7 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { botRegistry } from "./bot/botRegistry";
+import { startCommandBot } from "./bot/commandBot";
 
 const app: Express = express();
 
@@ -35,5 +36,7 @@ app.use("/api", router);
 botRegistry.autoStartAll().catch((err) => {
   logger.error({ err }, "Failed to auto-start bots");
 });
+
+startCommandBot();
 
 export default app;
