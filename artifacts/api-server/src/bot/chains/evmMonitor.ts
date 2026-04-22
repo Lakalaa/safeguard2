@@ -92,7 +92,7 @@ export class EvmMonitor {
   private async poll(): Promise<void> {
     if (!this.provider || !this.contract || !this.running) return;
 
-    const latestBlock = await this.provider.getBlockNumber();
+    const latestBlock = (await this.provider.getBlockNumber()) - 1; // -1 to avoid "beyond head" errors
     if (latestBlock <= this.lastProcessedBlock) return;
 
     const fromBlock = this.lastProcessedBlock + 1;
