@@ -226,6 +226,10 @@ class BuyAlertBot {
           let tokensReceived = 0;
           let amountNative = 0;
 
+          const preBalances = tx.meta.preBalances;
+          const postBalances = tx.meta.postBalances;
+          const accountKeys = tx.transaction.message.accountKeys;
+
           for (const post of postTokenBalances) {
             if (post.mint !== this.monitoringToken) continue;
             const pre = preTokenBalances.find(
@@ -237,22 +241,31 @@ class BuyAlertBot {
 
             if (diff > 0) {
               tokensReceived = diff;
-              buyerAddress = tx.transaction.message.accountKeys[post.accountIndex]?.pubkey?.toString() ?? null;
 
-              const preBalances = tx.meta.preBalances;
-              const postBalances = tx.meta.postBalances;
-              const accountKeys = tx.transaction.message.accountKeys;
+              // post.owner is the real wallet address that owns this token account
+              // (not the token account / ATA address itself)
+              buyerAddress = post.owner ?? null;
 
-              for (let i = 0; i < accountKeys.length; i++) {
-                const key = accountKeys[i];
-                if (!key) continue;
-                const keyStr = typeof key === "string" ? key : key.pubkey?.toString() ?? "";
-                if (keyStr === buyerAddress) {
-                  const solDiff = ((preBalances[i] ?? 0) - (postBalances[i] ?? 0)) / 1e9;
-                  if (solDiff > 0) amountNative = solDiff;
-                  break;
+              if (buyerAddress) {
+                // Find the SOL balance change for the buyer's actual wallet
+                for (let i = 0; i < accountKeys.length; i++) {
+                  const key = accountKeys[i];
+                  if (!key) continue;
+                  const keyStr = typeof key === "string" ? key : (key as { pubkey: { toString(): string } }).pubkey?.toString() ?? "";
+                  if (keyStr === buyerAddress) {
+                    const solDiff = ((preBalances[i] ?? 0) - (postBalances[i] ?? 0)) / 1e9;
+                    if (solDiff > 0) amountNative = solDiff;
+                    break;
+                  }
                 }
               }
+
+              // Fallback: if buyer wallet not in account keys, use fee payer SOL diff
+              if (amountNative === 0 && preBalances[0] !== undefined && postBalances[0] !== undefined) {
+                const feeDiff = (preBalances[0] - postBalances[0]) / 1e9;
+                if (feeDiff > 0) amountNative = feeDiff;
+              }
+
               break;
             }
           }
