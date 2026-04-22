@@ -303,12 +303,16 @@ components:
         txSignature:
           type: string
           nullable: true
+        chain:
+          type: string
         buyerAddress:
           type: string
         amountUsd:
           type: number
         amountNative:
           type: number
+        nativeCurrency:
+          type: string
         tokensReceived:
           type: number
         marketCap:
@@ -323,7 +327,7 @@ components:
           type: string
           format: date-time
       required:
-        [id, buyerAddress, amountUsd, amountNative, tokensReceived, tier, sentAt]
+        [id, chain, buyerAddress, amountUsd, amountNative, nativeCurrency, tokensReceived, tier, sentAt]
 
     TokenInfo:
       type: object

@@ -1,9 +1,12 @@
 import TelegramBot from "node-telegram-bot-api";
-import { Connection, PublicKey, type Logs } from "@solana/web3.js";
 import { db } from "@workspace/db";
 import { botConfigTable, alertsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
+import { getChainConfig, detectChainFromAddress } from "./chains/chainConfig";
+import { SolanaMonitor, type BuyEvent } from "./chains/solanaMonitor";
+import { EvmMonitor } from "./chains/evmMonitor";
+import type { BotConfig } from "@workspace/db";
 
 export interface DexScreenerPair {
   pairAddress: string;
@@ -14,6 +17,7 @@ export interface DexScreenerPair {
   fdv?: number;
   marketCap?: number;
   liquidity?: { usd?: number };
+  chainId?: string;
   url?: string;
 }
 
@@ -25,17 +29,17 @@ export async function getDexScreenerData(tokenAddress: string): Promise<DexScree
     );
     if (!res.ok) return null;
     const data = (await res.json()) as { pairs?: DexScreenerPair[] };
-    const pairs = data.pairs?.filter((p) => p.baseToken.address === tokenAddress);
-    if (!pairs || pairs.length === 0) return null;
-    pairs.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
-    return pairs[0] ?? null;
+    if (!data.pairs || data.pairs.length === 0) return null;
+    // Filter to the base token and sort by liquidity
+    const matching = data.pairs.filter(
+      (p) => p.baseToken.address.toLowerCase() === tokenAddress.toLowerCase(),
+    );
+    const list = matching.length > 0 ? matching : data.pairs;
+    list.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
+    return list[0] ?? null;
   } catch {
     return null;
   }
-}
-
-function shortenAddress(addr: string): string {
-  return `${addr.slice(0, 4)}...${addr.slice(-4)}`;
 }
 
 function getTier(amountUsd: number, tier1: number, tier2: number, tier3: number): number {
@@ -53,13 +57,17 @@ function formatNumber(n: number): string {
 function buildAlertMessage(params: {
   tokenName: string;
   tokenSymbol: string;
+  chainName: string;
   tier: number;
   emojiPerTier: number;
   amountUsd: number;
   amountNative: number;
+  nativeCurrency: string;
   tokensReceived: number;
   buyerAddress: string;
   txSignature: string;
+  explorerTx: string;
+  explorerAddress: string;
   marketCap: number | null;
   priceChangePct: number | null;
   dextUrl?: string | null;
@@ -68,8 +76,8 @@ function buildAlertMessage(params: {
   trendingUrl?: string | null;
 }): string {
   const circles = "🟢".repeat(params.tier * params.emojiPerTier);
-  const buyerUrl = `https://solscan.io/account/${params.buyerAddress}`;
-  const txUrl = `https://solscan.io/tx/${params.txSignature}`;
+  const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
+  const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
 
   const positionLine =
     params.priceChangePct !== null
@@ -92,9 +100,9 @@ function buildAlertMessage(params: {
   }
 
   return (
-    `<b>${params.tokenName} Buy!</b>\n` +
+    `<b>${params.tokenName} Buy!</b> <i>${params.chainName}</i>\n` +
     `${circles}\n\n` +
-    `🔀 Spent <b>${formatNumber(params.amountUsd)}</b> (<b>${params.amountNative.toFixed(3)} SOL</b>)\n` +
+    `🔀 Spent <b>${formatNumber(params.amountUsd)}</b> (<b>${params.amountNative.toFixed(4)} ${params.nativeCurrency}</b>)\n` +
     `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `👤 <a href="${buyerUrl}">Buyer</a> / <a href="${txUrl}">TX</a>${positionLine}${mcapLine}\n\n` +
     links.join(" | ")
@@ -103,18 +111,11 @@ function buildAlertMessage(params: {
 
 class BuyAlertBot {
   private bot: TelegramBot | null = null;
-  private connection: Connection | null = null;
   private running = false;
   private monitoringToken: string | null = null;
   private lastCheckAt: Date | null = null;
   private lastError: string | null = null;
-  private seenSignatures = new Set<string>();
-  private subscriptionId: number | null = null;
-
-  // Cache SOL price for 60s
-  private solPriceCache: { price: number; fetchedAt: number } = { price: 150, fetchedAt: 0 };
-
-  // Cache DexScreener data for 30s
+  private monitor: SolanaMonitor | EvmMonitor | null = null;
   private dexCache: { data: DexScreenerPair | null; fetchedAt: number } = { data: null, fetchedAt: 0 };
 
   getStatus() {
@@ -146,19 +147,48 @@ class BuyAlertBot {
 
     try {
       this.bot = new TelegramBot(config.telegramToken, { polling: false });
-      // Use mainnet with WebSocket for live monitoring
-      this.connection = new Connection("https://api.mainnet-beta.solana.com", {
-        commitment: "confirmed",
-        wsEndpoint: "wss://api.mainnet-beta.solana.com",
-      });
+
+      // Detect chain — prefer config.chain, otherwise detect from address or DexScreener
+      let chainId = config.chain ?? detectChainFromAddress(config.tokenAddress);
+
+      // If DexScreener knows this token, use its chain
+      const dexData = await getDexScreenerData(config.tokenAddress);
+      if (dexData?.chainId) chainId = dexData.chainId;
+
+      const chainConfig = getChainConfig(chainId);
+      if (!chainConfig) {
+        this.lastError = `Unsupported chain: ${chainId}`;
+        return { running: false, error: this.lastError };
+      }
+
+      // Save detected chain back to DB
+      await db.update(botConfigTable).set({ chain: chainId }).where(eq(botConfigTable.id, config.id));
+
       this.monitoringToken = config.tokenAddress;
       this.running = true;
       this.lastError = null;
-      this.seenSignatures.clear();
+      this.dexCache = { data: dexData, fetchedAt: Date.now() };
 
-      await this.subscribeToLogs();
+      const handleBuy = (event: BuyEvent) => {
+        this.lastCheckAt = new Date();
+        this.onBuyEvent(event, chainId).catch((err) => {
+          logger.error({ err }, "Error handling buy event");
+        });
+      };
 
-      logger.info({ token: config.tokenAddress }, "Buy alert bot started (live WebSocket)");
+      if (chainConfig.type === "solana") {
+        this.monitor = new SolanaMonitor(config.tokenAddress, handleBuy);
+      } else {
+        const pairAddress = dexData?.pairAddress ?? null;
+        this.monitor = new EvmMonitor(config.tokenAddress, pairAddress, chainConfig, handleBuy);
+      }
+
+      await this.monitor.start();
+
+      logger.info(
+        { token: config.tokenAddress, chain: chainId },
+        `Buy alert bot started (${chainConfig.name})`,
+      );
       return { running: true };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -169,123 +199,28 @@ class BuyAlertBot {
   }
 
   async stop(): Promise<void> {
-    if (this.subscriptionId !== null && this.connection) {
-      try {
-        await this.connection.removeOnLogsListener(this.subscriptionId);
-      } catch {}
-      this.subscriptionId = null;
+    if (this.monitor) {
+      await this.monitor.stop();
+      this.monitor = null;
     }
     this.bot = null;
-    this.connection = null;
     this.running = false;
     this.monitoringToken = null;
-    this.seenSignatures.clear();
     this.dexCache = { data: null, fetchedAt: 0 };
     logger.info("Buy alert bot stopped");
   }
 
-  private async subscribeToLogs() {
-    if (!this.connection || !this.monitoringToken) return;
-
-    const mintPubkey = new PublicKey(this.monitoringToken);
-
-    this.subscriptionId = this.connection.onLogs(
-      mintPubkey,
-      (logs: Logs) => {
-        if (logs.err) return;
-        if (this.seenSignatures.has(logs.signature)) return;
-        this.seenSignatures.add(logs.signature);
-        this.lastCheckAt = new Date();
-
-        // Keep seen set from growing unbounded
-        if (this.seenSignatures.size > 2000) {
-          const arr = [...this.seenSignatures];
-          this.seenSignatures.clear();
-          arr.slice(-500).forEach((s) => this.seenSignatures.add(s));
-        }
-
-        this.processTransaction(logs.signature).catch((err) => {
-          logger.warn({ err, sig: logs.signature }, "Failed to process transaction");
-        });
-      },
-      "confirmed",
-    );
-
-    logger.info({ subscriptionId: this.subscriptionId }, "Subscribed to on-chain logs");
-  }
-
-  private async processTransaction(signature: string) {
-    if (!this.connection || !this.monitoringToken || !this.running) return;
-
+  private async onBuyEvent(event: BuyEvent, chainId: string): Promise<void> {
     const [config] = await db.select().from(botConfigTable).limit(1);
-    if (!config) return;
+    if (!config || !this.bot || !config.chatId) return;
 
-    const tx = await this.connection.getParsedTransaction(signature, {
-      maxSupportedTransactionVersion: 0,
-      commitment: "confirmed",
-    });
+    const chainConfig = getChainConfig(chainId);
+    if (!chainConfig) return;
 
-    if (!tx?.meta) return;
-
-    const postTokenBalances = tx.meta.postTokenBalances ?? [];
-    const preTokenBalances = tx.meta.preTokenBalances ?? [];
-    const preBalances = tx.meta.preBalances;
-    const postBalances = tx.meta.postBalances;
-    const accountKeys = tx.transaction.message.accountKeys;
-
-    let buyerAddress: string | null = null;
-    let tokensReceived = 0;
-    let amountNative = 0;
-
-    for (const post of postTokenBalances) {
-      if (post.mint !== this.monitoringToken) continue;
-
-      const pre = preTokenBalances.find((p) => p.accountIndex === post.accountIndex);
-      const postAmt = Number(post.uiTokenAmount.uiAmount ?? 0);
-      const preAmt = Number(pre?.uiTokenAmount?.uiAmount ?? 0);
-      const diff = postAmt - preAmt;
-
-      if (diff > 0) {
-        tokensReceived = diff;
-
-        // post.owner = the real wallet that owns this token account (works for any DEX)
-        buyerAddress = post.owner ?? null;
-
-        if (buyerAddress) {
-          // Look up the wallet's SOL balance change
-          for (let i = 0; i < accountKeys.length; i++) {
-            const key = accountKeys[i];
-            if (!key) continue;
-            const keyStr =
-              typeof key === "string"
-                ? key
-                : (key as { pubkey: { toString(): string } }).pubkey?.toString() ?? "";
-            if (keyStr === buyerAddress) {
-              const solDiff = ((preBalances[i] ?? 0) - (postBalances[i] ?? 0)) / 1e9;
-              if (solDiff > 0) amountNative = solDiff;
-              break;
-            }
-          }
-        }
-
-        // Fallback: fee payer SOL change
-        if (amountNative === 0 && preBalances[0] !== undefined && postBalances[0] !== undefined) {
-          const feeDiff = (preBalances[0] - postBalances[0]) / 1e9;
-          if (feeDiff > 0) amountNative = feeDiff;
-        }
-
-        break;
-      }
-    }
-
-    if (!buyerAddress || tokensReceived <= 0) return;
-
-    const solPriceUsd = await this.getSolPrice();
-    const amountUsd = amountNative * solPriceUsd;
-
+    const { amountUsd } = event;
     if (amountUsd < (config.minBuyUsd ?? 1)) return;
 
-    const dexData = await this.getCachedDexData();
+    const dexData = await this.getCachedDexData(config.tokenAddress);
     const marketCap = dexData?.marketCap ?? dexData?.fdv ?? null;
     const priceChangePct = dexData?.priceChange?.h24 ?? null;
 
@@ -294,30 +229,35 @@ class BuyAlertBot {
     const [savedAlert] = await db
       .insert(alertsTable)
       .values({
-        txSignature: signature,
-        buyerAddress,
-        amountUsd,
-        amountNative,
-        tokensReceived,
+        txSignature: event.signature,
+        chain: chainId,
+        buyerAddress: event.buyerAddress,
+        amountUsd: event.amountUsd,
+        amountNative: event.amountNative,
+        nativeCurrency: chainConfig.nativeCurrency,
+        tokensReceived: event.tokensReceived,
         marketCap: marketCap ?? null,
         priceChangePct: priceChangePct ?? null,
         tier,
       })
-      .onConflictDoNothing()
       .returning();
 
-    if (!savedAlert || !this.bot || !config.chatId) return;
+    if (!savedAlert) return;
 
     const message = buildAlertMessage({
       tokenName: config.tokenName ?? dexData?.baseToken.name ?? "Token",
       tokenSymbol: config.tokenSymbol ?? dexData?.baseToken.symbol ?? "TKN",
+      chainName: chainConfig.name,
       tier,
       emojiPerTier: config.emojiPerTier,
-      amountUsd,
-      amountNative,
-      tokensReceived,
-      buyerAddress,
-      txSignature: signature,
+      amountUsd: event.amountUsd,
+      amountNative: event.amountNative,
+      nativeCurrency: chainConfig.nativeCurrency,
+      tokensReceived: event.tokensReceived,
+      buyerAddress: event.buyerAddress,
+      txSignature: event.signature,
+      explorerTx: chainConfig.explorerTx,
+      explorerAddress: chainConfig.explorerAddress,
       marketCap: marketCap ?? null,
       priceChangePct: priceChangePct ?? null,
       dextUrl: config.dextUrl,
@@ -339,53 +279,17 @@ class BuyAlertBot {
     }
 
     logger.info(
-      { buyer: buyerAddress, amountUsd, tokensReceived, tier },
+      { buyer: event.buyerAddress, amountUsd, chain: chainId, tier },
       "Buy alert sent",
     );
   }
 
-  private async getCachedDexData(): Promise<DexScreenerPair | null> {
+  private async getCachedDexData(tokenAddress: string): Promise<DexScreenerPair | null> {
     const now = Date.now();
     if (now - this.dexCache.fetchedAt < 30_000) return this.dexCache.data;
-    if (!this.monitoringToken) return null;
-    const data = await getDexScreenerData(this.monitoringToken);
+    const data = await getDexScreenerData(tokenAddress);
     this.dexCache = { data, fetchedAt: now };
     return data;
-  }
-
-  private async getSolPrice(): Promise<number> {
-    const now = Date.now();
-    if (now - this.solPriceCache.fetchedAt < 60_000 && this.solPriceCache.price > 0) {
-      return this.solPriceCache.price;
-    }
-    try {
-      const res = await fetch(
-        "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
-      );
-      if (res.ok) {
-        const data = (await res.json()) as { solana?: { usd?: number } };
-        const p = data.solana?.usd ?? 0;
-        if (p > 0) {
-          this.solPriceCache = { price: p, fetchedAt: now };
-          return p;
-        }
-      }
-    } catch {}
-    // fallback to DexScreener
-    try {
-      const res = await fetch(
-        "https://api.dexscreener.com/latest/dex/tokens/So11111111111111111111111111111111111111112",
-      );
-      if (res.ok) {
-        const data = (await res.json()) as { pairs?: { priceUsd?: string }[] };
-        const p = parseFloat(data.pairs?.[0]?.priceUsd ?? "0");
-        if (p > 0) {
-          this.solPriceCache = { price: p, fetchedAt: now };
-          return p;
-        }
-      }
-    } catch {}
-    return this.solPriceCache.price || 150;
   }
 
   async sendTestAlert(): Promise<{ success: boolean; message: string }> {
@@ -397,40 +301,19 @@ class BuyAlertBot {
 
     try {
       const testBot = new TelegramBot(config.telegramToken, { polling: false });
-      const tokenName = config.tokenName ?? "SOSANA";
-      const tokenSymbol = config.tokenSymbol ?? "SOSANA";
+      const tokenName = config.tokenName ?? "your token";
+      const chainId = config.chain ?? "solana";
+      const chainConfig = getChainConfig(chainId);
+      const chainName = chainConfig?.name ?? chainId;
 
-      const message = buildAlertMessage({
-        tokenName,
-        tokenSymbol,
-        tier: 2,
-        emojiPerTier: config.emojiPerTier,
-        amountUsd: 85.5,
-        amountNative: 0.992,
-        tokensReceived: 534_000,
-        buyerAddress: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-        txSignature: "5KtMGnmhBhPQcnFNFZ6JwxfY1VkuViGWMQXhBhv8oEF3QSMbnXZF7zWvdA52hAz9Dc1F4kxJm6wP4wX7uKvdR2",
-        marketCap: 13_397_935,
-        priceChangePct: 92,
-        dextUrl: config.dextUrl,
-        screenerUrl: config.screenerUrl,
-        buyUrl: config.buyUrl,
-        trendingUrl: config.trendingUrl,
-      });
+      const msg =
+        `✅ <b>Bot connected successfully!</b>\n\n` +
+        `Monitoring: <b>${tokenName}</b> on <b>${chainName}</b>\n` +
+        `Min buy: <b>$${config.minBuyUsd ?? 1}</b>\n\n` +
+        `Real buy alerts will appear here as they happen on-chain.`;
 
-      if (config.alertImageUrl) {
-        await testBot.sendPhoto(config.chatId, config.alertImageUrl, {
-          caption: message,
-          parse_mode: "HTML",
-        });
-      } else {
-        await testBot.sendMessage(config.chatId, message, {
-          parse_mode: "HTML",
-          disable_web_page_preview: true,
-        });
-      }
-
-      return { success: true, message: "Test alert sent successfully!" };
+      await testBot.sendMessage(config.chatId, msg, { parse_mode: "HTML" });
+      return { success: true, message: "Connection verified! Bot is ready." };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return { success: false, message: msg };

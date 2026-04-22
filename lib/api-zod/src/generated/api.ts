@@ -129,9 +129,11 @@ export const ListAlertsQueryParams = zod.object({
 export const ListAlertsResponseItem = zod.object({
   id: zod.number(),
   txSignature: zod.string().nullish(),
+  chain: zod.string(),
   buyerAddress: zod.string(),
   amountUsd: zod.number(),
   amountNative: zod.number(),
+  nativeCurrency: zod.string(),
   tokensReceived: zod.number(),
   marketCap: zod.number().nullish(),
   priceChangePct: zod.number().nullish(),

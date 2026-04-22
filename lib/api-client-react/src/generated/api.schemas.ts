@@ -39,9 +39,11 @@ export interface BotStatus {
 export interface BuyAlert {
   id: number;
   txSignature?: string | null;
+  chain: string;
   buyerAddress: string;
   amountUsd: number;
   amountNative: number;
+  nativeCurrency: string;
   tokensReceived: number;
   marketCap?: number | null;
   priceChangePct?: number | null;

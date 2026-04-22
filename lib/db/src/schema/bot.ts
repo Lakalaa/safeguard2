@@ -36,9 +36,11 @@ export const botConfigTable = pgTable("bot_config", {
 export const alertsTable = pgTable("alerts", {
   id: serial("id").primaryKey(),
   txSignature: text("tx_signature"),
+  chain: text("chain").notNull().default("solana"),
   buyerAddress: text("buyer_address").notNull(),
   amountUsd: real("amount_usd").notNull(),
   amountNative: real("amount_native").notNull(),
+  nativeCurrency: text("native_currency").notNull().default("SOL"),
   tokensReceived: real("tokens_received").notNull(),
   marketCap: real("market_cap"),
   priceChangePct: real("price_change_pct"),

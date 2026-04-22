@@ -260,13 +260,13 @@ export default function Settings() {
       <Section
         icon={Target}
         title="Token to Monitor"
-        description="Paste any Solana token contract address — details auto-fill"
+        description="Paste any token contract address (Solana, Ethereum, BSC, Base, Arbitrum, Polygon…) — chain and details auto-detect"
       >
         <div className="grid gap-1.5">
           <Label className="text-sm font-medium">Token Address</Label>
           <div className="relative">
             <Input
-              placeholder="Paste any Solana token mint address..."
+              placeholder="Paste any token address — Solana, ETH, BSC, Base, Arbitrum, Polygon…"
               {...register("tokenAddress")}
               data-testid="input-token-address"
               className="pr-9"
