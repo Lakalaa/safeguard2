@@ -212,6 +212,18 @@ router.get("/bots/:id/stats", async (req, res) => {
   }));
 });
 
+// DexScreener chainId → DexTools chain slug (they differ for several chains)
+const DEXTOOLS_CHAIN: Record<string, string> = {
+  ethereum: "ether",
+  bsc: "bnb",
+  polygon: "polygon",
+  arbitrum: "arbitrum",
+  base: "base",
+  avalanche: "avalanche",
+  optimism: "optimism",
+  solana: "solana",
+};
+
 router.get("/token-info", async (req, res) => {
   const query = GetTokenInfoQueryParams.parse(req.query);
   const address = query.address;
@@ -225,11 +237,15 @@ router.get("/token-info", async (req, res) => {
   const chainId = dexData.chainId ?? "solana";
   const pairAddress = dexData.pairAddress;
   const isEvm = address.startsWith("0x");
-  const chainPath = isEvm ? chainId : "solana";
-  const dexscreenerUrl = `https://dexscreener.com/${chainPath}/${pairAddress}`;
-  const dextoolsUrl = isEvm
-    ? `https://www.dextools.io/app/en/${chainId}/pair-explorer/${pairAddress}`
-    : `https://www.dextools.io/app/en/solana/pair-explorer/${pairAddress}`;
+
+  // DexScreener URL — uses chainId directly (e.g. /ethereum/, /bsc/, /solana/)
+  const dexscreenerUrl = `https://dexscreener.com/${chainId}/${pairAddress}`;
+
+  // DexTools URL — uses its own chain slug (ether, bnb, etc.)
+  const dextoolsChain = DEXTOOLS_CHAIN[chainId] ?? chainId;
+  const dextoolsUrl = `https://www.dextools.io/app/en/${dextoolsChain}/pair-explorer/${pairAddress}`;
+
+  // raydiumUrl only for Solana — Buy URL is always user-custom, this is just metadata
   const raydiumUrl = isEvm ? null : `https://raydium.io/swap/?inputMint=sol&outputMint=${address}`;
 
   res.json(GetTokenInfoResponse.parse({
