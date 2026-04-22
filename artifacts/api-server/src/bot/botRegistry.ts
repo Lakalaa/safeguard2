@@ -41,10 +41,17 @@ export async function getDexScreenerData(tokenAddress: string): Promise<DexScree
   }
 }
 
-function getTier(amountUsd: number, tier1: number, tier2: number, tier3: number): number {
-  if (amountUsd >= tier3) return 3;
-  if (amountUsd >= tier2) return 2;
-  return 1;
+/**
+ * Auto-tier based on multiples of the configured min buy.
+ * Tier 1 (small):  1× – 9× minBuy
+ * Tier 2 (medium): 10× – 49× minBuy
+ * Tier 3 (whale):  50×+ minBuy
+ */
+function getTier(amountUsd: number, minBuyUsd: number): number {
+  const min = minBuyUsd > 0 ? minBuyUsd : 1;
+  if (amountUsd >= min * 50) return 3; // whale
+  if (amountUsd >= min * 10) return 2; // medium
+  return 1;                             // small
 }
 
 function formatNumber(n: number): string {
@@ -78,25 +85,40 @@ interface AlertParams {
 
 function buildAlertMessage(params: AlertParams): string {
   const emoji = params.alertEmoji || "🟢";
-  const circles = emoji.repeat(params.tier * params.emojiPerTier);
+  const count = Math.max(1, params.emojiPerTier);
+
+  // Emojis scale with tier: tier 1 = count, tier 2 = count×2, tier 3 = count×3
+  const emojiBar = emoji.repeat(count * params.tier);
+
+  // Whale label for tier 3
+  const buyLabel = params.tier === 3 ? "🐋 Whale Buy!" : "New Buy!";
+
   const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
   const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
+  const shortBuyer = `${params.buyerAddress.slice(0, 6)}…${params.buyerAddress.slice(-4)}`;
 
-  const positionLine =
-    params.priceChangePct !== null
-      ? `\n🪙 Position ${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(0)}%`
-      : "";
-  const mcapLine =
-    params.marketCap !== null
-      ? `\n💰 Market Cap ${formatNumber(params.marketCap)}`
-      : "";
+  const nativeStr = params.amountNative > 0
+    ? ` (${params.amountNative.toFixed(4)} ${params.nativeCurrency})`
+    : "";
+
+  const mcapLine = params.marketCap !== null
+    ? `\n💎 Market Cap: <b>${formatNumber(params.marketCap)}</b>`
+    : "";
+
+  const priceChangeLine = params.priceChangePct !== null
+    ? `\n📊 24h: <b>${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(1)}%</b>`
+    : "";
 
   return (
-    `<b>${params.tokenName} Buy!</b> <i>${params.chainName}</i>\n` +
-    `${circles}\n\n` +
-    `🔀 Spent <b>${formatNumber(params.amountUsd)}</b> (<b>${params.amountNative.toFixed(4)} ${params.nativeCurrency}</b>)\n` +
-    `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
-    `👤 <a href="${buyerUrl}">Buyer</a> · <a href="${txUrl}">TX</a>${positionLine}${mcapLine}`
+    `${emojiBar}\n` +
+    `<b>${params.tokenName} — ${buyLabel}</b>\n` +
+    `${emojiBar}\n\n` +
+    `💰 Spent: <b>${formatNumber(params.amountUsd)}</b>${nativeStr}\n` +
+    `🪙 Got: <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
+    `👤 Buyer: <a href="${buyerUrl}">${shortBuyer}</a>` +
+    mcapLine +
+    priceChangeLine +
+    `\n\n🔗 <a href="${txUrl}">View TX</a>`
   );
 }
 
@@ -278,9 +300,10 @@ class BotRegistry {
           ? event.tokensReceived * tokenPriceUsd
           : 0;
 
-    if (amountUsd < (config.minBuyUsd ?? 1)) return;
+    const minBuy = config.minBuyUsd ?? 1;
+    if (amountUsd < minBuy) return;
 
-    const tier = getTier(amountUsd, config.tier1Min, config.tier2Min, config.tier3Min);
+    const tier = getTier(amountUsd, minBuy);
 
     await db.insert(alertsTable).values({
       botConfigId: configId,

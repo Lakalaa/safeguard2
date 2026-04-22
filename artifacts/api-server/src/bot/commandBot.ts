@@ -72,27 +72,26 @@ function chainKeyboard(): TelegramBot.InlineKeyboardMarkup {
 
 function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.InlineKeyboardMarkup {
   const emoji = config.alertEmoji ?? "🟢";
+  const count = config.emojiPerTier ?? 5;
   const hasMedia = !!(config.alertMediaFileId || config.alertImageUrl);
+  const min = config.minBuyUsd ?? 1;
   return {
     inline_keyboard: [
       [
-        { text: `🎨 Emoji: ${emoji} ×${config.emojiPerTier}`, callback_data: "cfg:emoji" },
+        { text: `${emoji} Emoji ×${count}`, callback_data: "cfg:emoji" },
         { text: hasMedia ? "📸 Media ✅" : "📸 Add Media", callback_data: "cfg:media" },
       ],
       [
         { text: config.buyUrl ? "🛒 Buy Link ✅" : "🛒 Set Buy Link", callback_data: "cfg:buy" },
-      ],
-      [
-        { text: `💵 Min Buy: $${config.minBuyUsd ?? 1}`, callback_data: "cfg:min" },
-        { text: "📊 Tiers", callback_data: "cfg:tiers" },
+        { text: `💵 Min: $${min}`, callback_data: "cfg:min" },
       ],
       [
         {
-          text: running ? "⏹ Stop Monitoring" : "▶️ Start Monitoring",
+          text: running ? "⏹ Stop" : "▶️ Start Monitoring",
           callback_data: running ? "action:stop" : "action:start",
         },
+        { text: "🔄 Refresh", callback_data: "action:status" },
       ],
-      [{ text: "🔄 Refresh Status", callback_data: "action:status" }],
     ],
   };
 }
@@ -106,27 +105,11 @@ function minBuyKeyboard(): TelegramBot.InlineKeyboardMarkup {
   return { inline_keyboard: rows };
 }
 
-function tiersKeyboard(): TelegramBot.InlineKeyboardMarkup {
-  const presets: Array<[string, number, number, number]> = [
-    ["Micro: $50 / $200 / $500", 50, 200, 500],
-    ["Small: $100 / $500 / $1K", 100, 500, 1000],
-    ["Mid: $250 / $1K / $5K", 250, 1000, 5000],
-    ["Large: $500 / $2K / $10K", 500, 2000, 10000],
-    ["Whale: $1K / $5K / $25K", 1000, 5000, 25000],
-  ];
-  return {
-    inline_keyboard: [
-      ...presets.map(([label, t1, t2, t3]) => [
-        { text: label, callback_data: `set:tiers:${t1}:${t2}:${t3}` },
-      ]),
-      [{ text: "⬅️ Back", callback_data: "action:settings" }],
-    ],
-  };
-}
-
 // ── Status text ───────────────────────────────────────────────────────────────
 function statusText(config: BotConfig, running: boolean): string {
   const emoji = config.alertEmoji ?? "🟢";
+  const count = config.emojiPerTier ?? 5;
+  const min = config.minBuyUsd ?? 1;
   const lines: string[] = [
     `<b>🛡 Buy Alert Bot — Settings</b>`,
     `Status: ${running ? "🟢 Running" : "⚫ Stopped"}`,
@@ -134,13 +117,13 @@ function statusText(config: BotConfig, running: boolean): string {
   if (config.tokenName) lines.push(`\n<b>Token:</b> ${config.tokenName} (${config.tokenSymbol ?? "?"})`);
   if (config.chain) lines.push(`<b>Chain:</b> ${CHAIN_LABELS[config.chain] ?? config.chain}`);
   if (config.tokenAddress) lines.push(`<b>Address:</b> <code>${config.tokenAddress}</code>`);
-  lines.push(`\n<b>Min Buy:</b> $${config.minBuyUsd ?? 1}`);
-  lines.push(`<b>Tiers:</b> $${config.tier1Min} / $${config.tier2Min} / $${config.tier3Min}`);
-  lines.push(`<b>Emoji:</b> ${emoji.repeat(config.emojiPerTier)} × tier level`);
+  lines.push(`\n<b>Min Buy:</b> $${min}`);
+  lines.push(
+    `<b>Alert emoji:</b> ${emoji.repeat(count)} small  |  ${emoji.repeat(count * 2)} medium  |  ${emoji.repeat(count * 3)} 🐋 whale`,
+  );
   if (config.alertMediaFileId || config.alertImageUrl) lines.push(`<b>Alert media:</b> ✅`);
   if (config.buyUrl) lines.push(`<b>Buy link:</b> ✅`);
-  if (config.dextUrl) lines.push(`<b>DexTools:</b> ✅ auto-filled`);
-  if (config.screenerUrl) lines.push(`<b>DexScreener:</b> ✅ auto-filled`);
+  if (config.dextUrl || config.screenerUrl) lines.push(`<b>DexTools / Screener:</b> ✅ auto-filled`);
   return lines.join("\n");
 }
 
@@ -457,28 +440,13 @@ export function startCommandBot(): void {
       return;
     }
 
-    // Tiers picker
-    if (data === "cfg:tiers") {
-      await bot.editMessageText(
-        `<b>📊 Tier Thresholds</b>\n\nBigger buys show more emojis:\n(Tier 1 / Tier 2 / Tier 3)`,
-        { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: tiersKeyboard() },
-      ).catch(() => null);
-      return;
-    }
-    if (data.startsWith("set:tiers:")) {
-      const [t1, t2, t3] = data.split(":").slice(2).map(Number);
-      await db.update(botConfigTable).set({ tier1Min: t1, tier2Min: t2, tier3Min: t3, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
-      const updated = await getOrCreate(chatId);
-      const { running } = botRegistry.getStatus(updated.id);
-      await sendSettings(bot, chatId, updated, running, msgId);
-      return;
-    }
-
     // Emoji prompt
     if (data === "cfg:emoji") {
       pendingState.set(chatId, { step: "await_emoji" });
+      const e = config.alertEmoji ?? "🟢";
+      const c = config.emojiPerTier ?? 5;
       await bot.sendMessage(chatId,
-        `🎨 <b>Set Alert Emoji</b>\n\nReply with the emoji for buy alerts:\n\nExamples: 🔥 💎 🚀 ⚡ 🐋 🟢 💰\n\nIt scales with buy size:\n• Tier 1: emoji × count\n• Tier 2: emoji × count × 2\n• Tier 3: emoji × count × 3`,
+        `🎨 <b>Set Alert Emoji</b>\n\nReply with the emoji to use on buy alerts.\n\nExamples: 🔥 💎 🚀 ⚡ 🐋 🟢 💰\n\nCurrent preview with <b>${e} ×${c}</b>:\n• Small buy: ${e.repeat(c)}\n• Medium buy: ${e.repeat(c * 2)}\n• 🐋 Whale: ${e.repeat(c * 3)}`,
         { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
       );
       return;
@@ -535,7 +503,7 @@ export function startCommandBot(): void {
       const emoji = msg.text.trim();
       pendingState.set(chatId, { step: "await_emoji_count", emoji });
       await bot.sendMessage(chatId,
-        `✅ Emoji: <b>${emoji}</b>\n\nReply with how many per tier (1–10):\n\n• Tier 1: ${emoji.repeat(3)}\n• Tier 2: ${emoji.repeat(6)}\n• Tier 3: ${emoji.repeat(9)}`,
+        `✅ Emoji: <b>${emoji}</b>\n\nNow reply with how many to show per buy (1–10):\n\nPreview with 5:\n• Small buy: ${emoji.repeat(5)}\n• Medium buy: ${emoji.repeat(10)}\n• 🐋 Whale: ${emoji.repeat(15)}`,
         { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
       );
       return;
@@ -555,7 +523,7 @@ export function startCommandBot(): void {
         .set({ alertEmoji: emoji, emojiPerTier: n, updatedAt: new Date() })
         .where(eq(botConfigTable.id, config.id));
       await bot.sendMessage(chatId,
-        `✅ Saved!\n• Tier 1: ${emoji.repeat(n)}\n• Tier 2: ${emoji.repeat(n * 2)}\n• Tier 3: ${emoji.repeat(n * 3)}`);
+        `✅ Emoji saved!\n• Small buy: ${emoji.repeat(n)}\n• Medium buy: ${emoji.repeat(n * 2)}\n• 🐋 Whale: ${emoji.repeat(n * 3)}\n\nScales automatically — no thresholds needed.`);
       const updated = await getOrCreate(chatId);
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running);
