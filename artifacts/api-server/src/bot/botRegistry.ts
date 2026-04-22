@@ -88,67 +88,55 @@ function buildAlertMessage(params: AlertParams): string {
   const max = Math.max(1, params.emojiPerTier);
 
   // Emoji count scales by tier:
-  //   Tier 1 (small) → 1 emoji always (no matter what emojiPerTier is)
-  //   Tier 2 (medium) → half of max, minimum 2
-  //   Tier 3 (whale) → full emojiPerTier
+  //   Tier 1 (small)  → 1 emoji
+  //   Tier 2 (medium) → half of max, min 2
+  //   Tier 3 (whale)  → full emojiPerTier
   const emojiCount =
     params.tier === 3 ? max :
     params.tier === 2 ? Math.max(2, Math.round(max / 2)) :
     1;
   const emojiBar = emoji.repeat(emojiCount);
 
-  // Whale label for tier 3
-  const buyLabel = params.tier === 3 ? "🐋 Whale Buy!" : "New Buy!";
+  const buyLabel = params.tier === 3 ? "🐋 Whale Buy!" : "Buy!";
 
   const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
   const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
-  const shortBuyer = `${params.buyerAddress.slice(0, 6)}…${params.buyerAddress.slice(-4)}`;
 
   const nativeStr = params.amountNative > 0
-    ? ` (${params.amountNative.toFixed(4)} ${params.nativeCurrency})`
+    ? ` (${params.amountNative.toFixed(3)} ${params.nativeCurrency})`
+    : "";
+
+  const positionLine = params.priceChangePct !== null
+    ? `\n🪙 Position <b>${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(0)}%</b>`
     : "";
 
   const mcapLine = params.marketCap !== null
-    ? `\n💎 Market Cap: <b>${formatNumber(params.marketCap)}</b>`
+    ? `\n💰 Market Cap <b>$${Math.round(params.marketCap).toLocaleString("en-US")}</b>`
     : "";
 
-  const priceChangeLine = params.priceChangePct !== null
-    ? `\n📊 24h: <b>${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(1)}%</b>`
-    : "";
-
-  // Action links embedded in text (NOT inline buttons)
+  // Bottom action links — all plain text hyperlinks, no inline buttons
   const linkParts: string[] = [];
-  if (params.buyUrl) linkParts.push(`<a href="${params.buyUrl}">🛒 Buy</a>`);
-  if (params.dextUrl) linkParts.push(`<a href="${params.dextUrl}">📊 DexTools</a>`);
-  if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">📈 DexScreener</a>`);
-  if (params.trendingUrl) linkParts.push(`<a href="${params.trendingUrl}">🔥 Trending</a>`);
-  const linksLine = linkParts.length > 0 ? `\n\n${linkParts.join("  |  ")}` : "";
+  if (params.dextUrl) linkParts.push(`<a href="${params.dextUrl}">DexT</a>`);
+  if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
+  if (params.buyUrl) linkParts.push(`<a href="${params.buyUrl}">Buy</a>`);
+  if (params.trendingUrl) linkParts.push(`<a href="${params.trendingUrl}">Trending</a>`);
+  const linksLine = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
   return (
-    `${emojiBar}\n` +
-    `<b>${params.tokenName} — ${buyLabel}</b>\n` +
+    `<b>${params.tokenName} ${buyLabel}</b>\n` +
     `${emojiBar}\n\n` +
-    `💰 Spent: <b>${formatNumber(params.amountUsd)}</b>${nativeStr}\n` +
-    `🪙 Got: <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
-    `👤 Buyer: <a href="${buyerUrl}">${shortBuyer}</a>` +
+    `🔀 Spent <b>${formatNumber(params.amountUsd)}</b>${nativeStr}\n` +
+    `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
+    `👤 <a href="${buyerUrl}">Buyer</a> / <a href="${txUrl}">TX</a>` +
+    positionLine +
     mcapLine +
-    priceChangeLine +
     linksLine
   );
 }
 
-function buildAlertKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup | undefined {
-  // Action links (Buy, DexTools, Screener, Trending) are embedded as hyperlinks
-  // in the message text. The keyboard only shows explorer buttons.
-  const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
-  const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
-
-  return {
-    inline_keyboard: [[
-      { text: "👤 Buyer Wallet", url: buyerUrl },
-      { text: "🔗 View TX", url: txUrl },
-    ]],
-  };
+function buildAlertKeyboard(_params: AlertParams): TelegramBot.InlineKeyboardMarkup {
+  // No inline buttons — everything is embedded as hyperlinks in the message text
+  return { inline_keyboard: [] };
 }
 
 interface BotInstance {
