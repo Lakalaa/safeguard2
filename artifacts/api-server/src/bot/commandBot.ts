@@ -6,28 +6,20 @@ import { botRegistry, getDexScreenerData } from "./botRegistry";
 import { logger } from "../lib/logger";
 import type { BotConfig } from "@workspace/db";
 
-const HELP_TEXT =
-  `<b>Safeguard Buy Alert Bot — Commands</b>\n\n` +
-  `<code>/setup &lt;address&gt;</code>\n` +
-  `  Set the token address to monitor (auto-detects chain)\n\n` +
-  `<code>/setmin &lt;usd&gt;</code>\n` +
-  `  Minimum buy in USD to trigger alert (default: $1)\n\n` +
-  `<code>/settiers &lt;t1&gt; &lt;t2&gt; &lt;t3&gt;</code>\n` +
-  `  Set tier thresholds e.g. /settiers 100 500 1000\n\n` +
-  `<code>/setemoji &lt;n&gt;</code>\n` +
-  `  Number of 🟢 per tier (default: 4)\n\n` +
-  `<code>/setimage &lt;url&gt;</code>\n` +
-  `  Image URL sent with each alert\n\n` +
-  `<code>/setbuy &lt;url&gt;</code>\n` +
-  `  Custom buy link (Raydium, Uniswap, Jupiter, etc.)\n\n` +
-  `<code>/setlinks dext=&lt;url&gt; screener=&lt;url&gt; trending=&lt;url&gt;</code>\n` +
-  `  Set DexTools, DexScreener and Trending links\n\n` +
-  `<code>/start</code> — Start monitoring\n` +
-  `<code>/stop</code> — Stop monitoring\n` +
-  `<code>/status</code> — Show current config and status\n` +
-  `<code>/test</code> — Send a test connection message\n` +
-  `<code>/help</code> — Show this message`;
+// ── In-memory state: waiting for text input after an inline button press ──────
+const pendingInput = new Map<string, { field: string; messageId: number }>();
 
+// ── Admin guard ────────────────────────────────────────────────────────────────
+async function isAdmin(bot: TelegramBot, chatId: string | number, userId: number): Promise<boolean> {
+  try {
+    const member = await bot.getChatMember(String(chatId), userId);
+    return member.status === "creator" || member.status === "administrator";
+  } catch {
+    return false;
+  }
+}
+
+// ── Get or create bot config row for a chat ───────────────────────────────────
 async function getOrCreate(chatId: string, chatTitle?: string): Promise<BotConfig> {
   const [existing] = await db
     .select()
@@ -35,7 +27,6 @@ async function getOrCreate(chatId: string, chatTitle?: string): Promise<BotConfi
     .where(eq(botConfigTable.chatId, chatId))
     .limit(1);
   if (existing) return existing;
-
   const [created] = await db
     .insert(botConfigTable)
     .values({ name: chatTitle ?? `Group ${chatId}`, chatId })
@@ -43,19 +34,63 @@ async function getOrCreate(chatId: string, chatTitle?: string): Promise<BotConfi
   return created!;
 }
 
-function formatConfig(config: BotConfig, running: boolean): string {
+// ── Setup panel inline keyboard ────────────────────────────────────────────────
+function setupKeyboard(config: BotConfig, running: boolean): TelegramBot.InlineKeyboardMarkup {
+  const tokenLabel = config.tokenName
+    ? `✅ Token: ${config.tokenName} (${config.tokenSymbol ?? "?"})`
+    : "🔧 Set Token Address";
+  const minLabel = `💵 Min Buy: $${config.minBuyUsd ?? 1}`;
+  const tiersLabel = `📊 Tiers: $${config.tier1Min}/$${config.tier2Min}/$${config.tier3Min}`;
+  const emojiLabel = `🟢 Emojis/tier: ${config.emojiPerTier}`;
+  const imageLabel = config.alertImageUrl ? "🖼 Image: set ✅" : "🖼 Set Alert Image";
+  const buyLabel = config.buyUrl ? "🛒 Buy Link: set ✅" : "🛒 Set Buy Link";
+  const linksLabel = "🔗 Set DexTools/Screener/Trending";
+  const toggleLabel = running ? "⏹ Stop Monitoring" : "▶️ Start Monitoring";
+  const toggleData = running ? "action:stop" : "action:start";
+
+  return {
+    inline_keyboard: [
+      [{ text: tokenLabel, callback_data: "setup:token" }],
+      [
+        { text: minLabel, callback_data: "setup:min" },
+        { text: tiersLabel, callback_data: "setup:tiers" },
+      ],
+      [
+        { text: emojiLabel, callback_data: "setup:emoji" },
+        { text: imageLabel, callback_data: "setup:image" },
+      ],
+      [
+        { text: buyLabel, callback_data: "setup:buy" },
+        { text: linksLabel, callback_data: "setup:links" },
+      ],
+      [{ text: toggleLabel, callback_data: toggleData }],
+      [{ text: "📋 Status", callback_data: "action:status" }],
+    ],
+  };
+}
+
+function statusText(config: BotConfig, running: boolean): string {
   const lines: string[] = [];
-  lines.push(`<b>Status:</b> ${running ? "🟢 Running" : "⚫ Stopped"}`);
+  lines.push(`<b>🤖 Safeguard Buy Alert Bot</b>`);
+  lines.push(`Status: ${running ? "🟢 Running" : "⚫ Stopped"}`);
+  lines.push("");
   lines.push(`<b>Token:</b> ${config.tokenName ?? "—"} ${config.tokenSymbol ? `(${config.tokenSymbol})` : ""}`);
   lines.push(`<b>Chain:</b> ${config.chain ?? "—"}`);
   if (config.tokenAddress) lines.push(`<b>Address:</b> <code>${config.tokenAddress}</code>`);
   lines.push(`<b>Min Buy:</b> $${config.minBuyUsd}`);
   lines.push(`<b>Tiers:</b> $${config.tier1Min} / $${config.tier2Min} / $${config.tier3Min}`);
   lines.push(`<b>Emojis/tier:</b> ${config.emojiPerTier}`);
-  if (config.buyUrl) lines.push(`<b>Buy link:</b> ${config.buyUrl}`);
-  if (config.alertImageUrl) lines.push(`<b>Image:</b> set`);
+  if (config.buyUrl) lines.push(`<b>Buy link:</b> set ✅`);
+  if (config.alertImageUrl) lines.push(`<b>Alert image:</b> set ✅`);
   return lines.join("\n");
 }
+
+// ── DEXTOOLS chain slug map ────────────────────────────────────────────────────
+const DEXTOOLS_CHAIN: Record<string, string> = {
+  ethereum: "ether", bsc: "bnb", polygon: "polygon",
+  arbitrum: "arbitrum", base: "base", avalanche: "avalanche",
+  optimism: "optimism", solana: "solana",
+};
 
 export function startCommandBot(): void {
   const token = process.env["TELEGRAM_BOT_TOKEN"];
@@ -70,7 +105,7 @@ export function startCommandBot(): void {
     logger.error({ err: err.message }, "Telegram polling error");
   });
 
-  // ── Bot added to group ─────────────────────────────────────────────────────
+  // ── Bot added to group → send setup panel ─────────────────────────────────
   bot.on("new_chat_members", async (msg) => {
     try {
       const me = await bot.getMe();
@@ -78,245 +113,310 @@ export function startCommandBot(): void {
       if (!isAdded) return;
 
       const chatId = String(msg.chat.id);
-      await getOrCreate(chatId, msg.chat.title);
+      const config = await getOrCreate(chatId, msg.chat.title);
+      const { running } = botRegistry.getStatus(config.id);
 
       await bot.sendMessage(
         chatId,
-        `👋 <b>Safeguard Buy Alert Bot</b> is here!\n\n` +
-        `To start monitoring token buys in this group:\n\n` +
-        `1️⃣ <code>/setup &lt;token_address&gt;</code>\n` +
-        `   Paste any token address (Solana, ETH, BSC, Base…)\n\n` +
-        `2️⃣ <code>/start</code>\n` +
-        `   Begin live on-chain monitoring\n\n` +
-        `Type /help to see all available commands.`,
-        { parse_mode: "HTML" },
+        `👋 <b>Safeguard Buy Alert Bot</b> is here!\n\nUse the panel below to configure and start monitoring token buys.\n<i>Only group admins can use these controls.</i>`,
+        {
+          parse_mode: "HTML",
+          reply_markup: setupKeyboard(config, running),
+        },
       );
     } catch (err) {
-      logger.error({ err }, "new_chat_members handler error");
+      logger.error({ err }, "new_chat_members error");
     }
   });
 
-  // ── /help ──────────────────────────────────────────────────────────────────
-  bot.onText(/^\/help(@\S+)?$/, async (msg) => {
+  // ── /setup command → show inline panel ────────────────────────────────────
+  bot.onText(/^\/setup(@\S+)?$/, async (msg) => {
+    if (!msg.from) return;
     const chatId = String(msg.chat.id);
-    await bot.sendMessage(chatId, HELP_TEXT, { parse_mode: "HTML" }).catch(() => null);
-  });
-
-  // ── /status ────────────────────────────────────────────────────────────────
-  bot.onText(/^\/status(@\S+)?$/, async (msg) => {
-    const chatId = String(msg.chat.id);
-    try {
-      const config = await getOrCreate(chatId, msg.chat.title);
-      const { running } = botRegistry.getStatus(config.id);
-      await bot.sendMessage(chatId, formatConfig(config, running), { parse_mode: "HTML" });
-    } catch (err) {
-      logger.error({ err }, "/status error");
-    }
-  });
-
-  // ── /setup <address> ───────────────────────────────────────────────────────
-  bot.onText(/^\/setup(@\S+)?(?:\s+(.+))?$/, async (msg, match) => {
-    const chatId = String(msg.chat.id);
-    const address = match?.[2]?.trim();
-
-    if (!address) {
-      await bot.sendMessage(chatId, "Usage: <code>/setup &lt;token_address&gt;</code>", { parse_mode: "HTML" });
-      return;
-    }
-
-    await bot.sendMessage(chatId, "🔍 Looking up token…");
-
-    try {
-      const config = await getOrCreate(chatId, msg.chat.title);
-      const dexData = await getDexScreenerData(address);
-
-      const chainId = dexData?.chainId ?? (address.startsWith("0x") ? "ethereum" : "solana");
-      const name = dexData?.baseToken.name ?? null;
-      const symbol = dexData?.baseToken.symbol ?? null;
-
-      // Auto-fill DexScreener and DexTools links
-      const DEXTOOLS_CHAIN: Record<string, string> = {
-        ethereum: "ether", bsc: "bnb", polygon: "polygon",
-        arbitrum: "arbitrum", base: "base", avalanche: "avalanche",
-        optimism: "optimism", solana: "solana",
-      };
-      const pairAddress = dexData?.pairAddress ?? null;
-      const dextoolsChain = DEXTOOLS_CHAIN[chainId] ?? chainId;
-      const screenerUrl = pairAddress ? `https://dexscreener.com/${chainId}/${pairAddress}` : null;
-      const dextUrl = pairAddress ? `https://www.dextools.io/app/en/${dextoolsChain}/pair-explorer/${pairAddress}` : null;
-
-      await db.update(botConfigTable).set({
-        tokenAddress: address,
-        tokenName: name,
-        tokenSymbol: symbol,
-        chain: chainId,
-        screenerUrl,
-        dextUrl,
-        updatedAt: new Date(),
-      }).where(eq(botConfigTable.id, config.id));
-
-      const priceUsd = dexData?.priceUsd ? parseFloat(dexData.priceUsd) : null;
-      const mcap = dexData?.marketCap ?? dexData?.fdv ?? null;
-
-      let reply = dexData
-        ? `✅ <b>${name} (${symbol})</b> found on <b>${chainId}</b>\n`
-        : `✅ Token address set (not found on DexScreener — chain auto-detected as <b>${chainId}</b>)\n`;
-      if (priceUsd) reply += `💵 Price: <b>$${priceUsd.toFixed(6)}</b>\n`;
-      if (mcap) reply += `📊 Market Cap: <b>$${mcap >= 1_000_000 ? (mcap / 1_000_000).toFixed(2) + "M" : (mcap / 1_000).toFixed(0) + "K"}</b>\n`;
-      reply += `\nType /start to begin monitoring buys.`;
-
-      await bot.sendMessage(chatId, reply, { parse_mode: "HTML" });
-    } catch (err) {
-      logger.error({ err }, "/setup error");
-      await bot.sendMessage(chatId, "❌ Failed to look up token. Check the address and try again.");
-    }
-  });
-
-  // ── /setmin <usd> ──────────────────────────────────────────────────────────
-  bot.onText(/^\/setmin(@\S+)?(?:\s+(.+))?$/, async (msg, match) => {
-    const chatId = String(msg.chat.id);
-    const val = parseFloat(match?.[2] ?? "");
-    if (isNaN(val) || val < 0) {
-      await bot.sendMessage(chatId, "Usage: <code>/setmin &lt;usd&gt;</code>  e.g. /setmin 50", { parse_mode: "HTML" });
+    if (!(await isAdmin(bot, chatId, msg.from.id))) {
+      await bot.sendMessage(chatId, "⛔ Only group admins can use this command.");
       return;
     }
     const config = await getOrCreate(chatId, msg.chat.title);
-    await db.update(botConfigTable).set({ minBuyUsd: val, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
-    await bot.sendMessage(chatId, `✅ Minimum buy set to <b>$${val}</b>`, { parse_mode: "HTML" });
+    const { running } = botRegistry.getStatus(config.id);
+    await bot.sendMessage(chatId, statusText(config, running), {
+      parse_mode: "HTML",
+      reply_markup: setupKeyboard(config, running),
+    });
   });
 
-  // ── /settiers <t1> <t2> <t3> ───────────────────────────────────────────────
-  bot.onText(/^\/settiers(@\S+)?(?:\s+(.+))?$/, async (msg, match) => {
+  // ── /start command ─────────────────────────────────────────────────────────
+  bot.onText(/^\/start(@\S+)?$/, async (msg) => {
+    if (!msg.from) return;
     const chatId = String(msg.chat.id);
-    const parts = (match?.[2] ?? "").trim().split(/\s+/).map(Number);
-    if (parts.length !== 3 || parts.some(isNaN)) {
-      await bot.sendMessage(chatId, "Usage: <code>/settiers &lt;t1&gt; &lt;t2&gt; &lt;t3&gt;</code>  e.g. /settiers 100 500 1000", { parse_mode: "HTML" });
-      return;
-    }
-    const [t1, t2, t3] = parts as [number, number, number];
-    const config = await getOrCreate(chatId, msg.chat.title);
-    await db.update(botConfigTable).set({ tier1Min: t1, tier2Min: t2, tier3Min: t3, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
-    await bot.sendMessage(chatId, `✅ Tiers set: 🟢 $${t1} / 🟢🟢 $${t2} / 🟢🟢🟢 $${t3}`, { parse_mode: "HTML" });
-  });
-
-  // ── /setemoji <n> ──────────────────────────────────────────────────────────
-  bot.onText(/^\/setemoji(@\S+)?(?:\s+(\d+))?$/, async (msg, match) => {
-    const chatId = String(msg.chat.id);
-    const n = parseInt(match?.[2] ?? "");
-    if (isNaN(n) || n < 1 || n > 20) {
-      await bot.sendMessage(chatId, "Usage: <code>/setemoji &lt;1-20&gt;</code>  e.g. /setemoji 4", { parse_mode: "HTML" });
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) {
+      await bot.sendMessage(chatId, "⛔ Only group admins can use this command.");
       return;
     }
     const config = await getOrCreate(chatId, msg.chat.title);
-    await db.update(botConfigTable).set({ emojiPerTier: n, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
-    await bot.sendMessage(chatId, `✅ Emojis per tier set to <b>${n}</b>  ${("🟢").repeat(n)}`, { parse_mode: "HTML" });
-  });
-
-  // ── /setimage <url> ────────────────────────────────────────────────────────
-  bot.onText(/^\/setimage(@\S+)?(?:\s+(.+))?$/, async (msg, match) => {
-    const chatId = String(msg.chat.id);
-    const url = match?.[2]?.trim() ?? "";
-    if (!url.startsWith("http")) {
-      await bot.sendMessage(chatId, "Usage: <code>/setimage &lt;url&gt;</code>  — provide a direct image URL", { parse_mode: "HTML" });
-      return;
-    }
-    const config = await getOrCreate(chatId, msg.chat.title);
-    await db.update(botConfigTable).set({ alertImageUrl: url, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
-    await bot.sendMessage(chatId, `✅ Alert image set.`);
-  });
-
-  // ── /setbuy <url> ──────────────────────────────────────────────────────────
-  bot.onText(/^\/setbuy(@\S+)?(?:\s+(.+))?$/, async (msg, match) => {
-    const chatId = String(msg.chat.id);
-    const url = match?.[2]?.trim() ?? "";
-    if (!url.startsWith("http")) {
-      await bot.sendMessage(chatId, "Usage: <code>/setbuy &lt;url&gt;</code>  e.g. /setbuy https://raydium.io/swap/…", { parse_mode: "HTML" });
-      return;
-    }
-    const config = await getOrCreate(chatId, msg.chat.title);
-    await db.update(botConfigTable).set({ buyUrl: url, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
-    await bot.sendMessage(chatId, `✅ Buy link set.`);
-  });
-
-  // ── /setlinks [dext=url] [screener=url] [trending=url] ────────────────────
-  bot.onText(/^\/setlinks(@\S+)?(?:\s+(.+))?$/, async (msg, match) => {
-    const chatId = String(msg.chat.id);
-    const raw = match?.[2] ?? "";
-    if (!raw.trim()) {
+    if (!config.tokenAddress) {
       await bot.sendMessage(chatId,
-        "Usage: <code>/setlinks dext=&lt;url&gt; screener=&lt;url&gt; trending=&lt;url&gt;</code>\n" +
-        "All fields optional — only provided ones are updated.",
+        `⚠️ No token set yet. Use /setup to configure the bot.`,
         { parse_mode: "HTML" });
       return;
     }
-
-    const updates: Partial<typeof botConfigTable.$inferInsert> & { updatedAt: Date } = { updatedAt: new Date() };
-    for (const part of raw.split(/\s+/)) {
-      const [key, ...rest] = part.split("=");
-      const val = rest.join("=");
-      if (!val) continue;
-      if (key === "dext") updates.dextUrl = val;
-      else if (key === "screener") updates.screenerUrl = val;
-      else if (key === "trending") updates.trendingUrl = val;
+    const result = await botRegistry.start(config.id);
+    if (result.running) {
+      await bot.sendMessage(chatId,
+        `✅ <b>Started!</b> Monitoring <b>${config.tokenName ?? config.tokenAddress}</b> on <b>${config.chain ?? "chain"}</b>.\nBuy alerts will appear here live.`,
+        { parse_mode: "HTML" });
+    } else {
+      await bot.sendMessage(chatId, `❌ Failed to start: ${result.error ?? "unknown error"}`);
     }
-
-    const config = await getOrCreate(chatId, msg.chat.title);
-    await db.update(botConfigTable).set(updates).where(eq(botConfigTable.id, config.id));
-    await bot.sendMessage(chatId, `✅ Links updated.`);
   });
 
-  // ── /start ─────────────────────────────────────────────────────────────────
-  bot.onText(/^\/start(@\S+)?$/, async (msg) => {
+  // ── /stop command ──────────────────────────────────────────────────────────
+  bot.onText(/^\/stop(@\S+)?$/, async (msg) => {
+    if (!msg.from) return;
     const chatId = String(msg.chat.id);
-    try {
-      const config = await getOrCreate(chatId, msg.chat.title);
+    if (!(await isAdmin(bot, chatId, msg.from.id))) {
+      await bot.sendMessage(chatId, "⛔ Only group admins can use this command.");
+      return;
+    }
+    const config = await getOrCreate(chatId, msg.chat.title);
+    await botRegistry.stop(config.id);
+    await bot.sendMessage(chatId, "⏹ Monitoring stopped.");
+  });
 
+  // ── /status command ────────────────────────────────────────────────────────
+  bot.onText(/^\/status(@\S+)?$/, async (msg) => {
+    if (!msg.from) return;
+    const chatId = String(msg.chat.id);
+    if (!(await isAdmin(bot, chatId, msg.from.id))) return;
+    const config = await getOrCreate(chatId, msg.chat.title);
+    const { running } = botRegistry.getStatus(config.id);
+    await bot.sendMessage(chatId, statusText(config, running), {
+      parse_mode: "HTML",
+      reply_markup: setupKeyboard(config, running),
+    });
+  });
+
+  // ── Inline button callbacks ────────────────────────────────────────────────
+  bot.on("callback_query", async (query) => {
+    if (!query.message || !query.from) return;
+    const chatId = String(query.message.chat.id);
+    const msgId = query.message.message_id;
+    const data = query.data ?? "";
+
+    const admin = await isAdmin(bot, chatId, query.from.id);
+    if (!admin) {
+      await bot.answerCallbackQuery(query.id, { text: "⛔ Admins only", show_alert: true });
+      return;
+    }
+
+    await bot.answerCallbackQuery(query.id);
+
+    const config = await getOrCreate(chatId, query.message.chat.title);
+
+    // ── Action buttons ──────────────────────────────────────────────────────
+    if (data === "action:start") {
       if (!config.tokenAddress) {
-        await bot.sendMessage(chatId,
-          "⚠️ No token configured yet.\nUse <code>/setup &lt;token_address&gt;</code> first.",
-          { parse_mode: "HTML" });
+        await bot.sendMessage(chatId, "⚠️ Set the token address first (tap 🔧 Set Token Address).");
         return;
       }
-
-      await bot.sendMessage(chatId, "⏳ Starting monitor…");
       const result = await botRegistry.start(config.id);
-
-      if (result.running) {
-        await bot.sendMessage(chatId,
-          `✅ <b>Bot started!</b>\n\nMonitoring <b>${config.tokenName ?? config.tokenAddress}</b> on <b>${config.chain ?? "chain"}</b>\nBuy alerts will appear here live.`,
-          { parse_mode: "HTML" });
-      } else {
-        await bot.sendMessage(chatId, `❌ Failed to start: ${result.error ?? "unknown error"}`);
-      }
-    } catch (err) {
-      logger.error({ err }, "/start error");
-      await bot.sendMessage(chatId, "❌ An error occurred. Check the token address and try again.");
+      const updated = await getOrCreate(chatId);
+      const { running } = botRegistry.getStatus(updated.id);
+      const text = result.running
+        ? `✅ <b>Started!</b> Monitoring <b>${config.tokenName ?? config.tokenAddress}</b>.`
+        : `❌ ${result.error ?? "Failed to start"}`;
+      await bot.editMessageText(statusText(updated, running), {
+        chat_id: chatId, message_id: msgId,
+        parse_mode: "HTML", reply_markup: setupKeyboard(updated, running),
+      }).catch(() => null);
+      await bot.sendMessage(chatId, text, { parse_mode: "HTML" });
+      return;
     }
-  });
 
-  // ── /stop ──────────────────────────────────────────────────────────────────
-  bot.onText(/^\/stop(@\S+)?$/, async (msg) => {
-    const chatId = String(msg.chat.id);
-    try {
-      const config = await getOrCreate(chatId, msg.chat.title);
+    if (data === "action:stop") {
       await botRegistry.stop(config.id);
-      await bot.sendMessage(chatId, "⏹ Bot stopped. Use /start to resume.");
-    } catch (err) {
-      logger.error({ err }, "/stop error");
+      const updated = await getOrCreate(chatId);
+      await bot.editMessageText(statusText(updated, false), {
+        chat_id: chatId, message_id: msgId,
+        parse_mode: "HTML", reply_markup: setupKeyboard(updated, false),
+      }).catch(() => null);
+      return;
     }
+
+    if (data === "action:status") {
+      const { running } = botRegistry.getStatus(config.id);
+      await bot.editMessageText(statusText(config, running), {
+        chat_id: chatId, message_id: msgId,
+        parse_mode: "HTML", reply_markup: setupKeyboard(config, running),
+      }).catch(() => null);
+      return;
+    }
+
+    // ── Setup field buttons → prompt for value ──────────────────────────────
+    const prompts: Record<string, string> = {
+      "setup:token":
+        "📋 <b>Set Token Address</b>\n\nReply with the token contract address to monitor.\nWorks for Solana, ETH, BSC, Base, Arbitrum, Polygon, Avalanche, Optimism.\n\nExample: <code>EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v</code>",
+      "setup:min":
+        "💵 <b>Set Minimum Buy (USD)</b>\n\nReply with the minimum buy amount in USD to trigger an alert.\n\nExample: <code>50</code>",
+      "setup:tiers":
+        "📊 <b>Set Tier Thresholds</b>\n\nReply with 3 USD amounts separated by spaces.\n\nExample: <code>100 500 1000</code>\n(Tier 1 = $100+, Tier 2 = $500+, Tier 3 = $1000+)",
+      "setup:emoji":
+        "🟢 <b>Set Emojis Per Tier</b>\n\nReply with a number (1–20). Each tier adds this many 🟢 to the alert.\n\nExample: <code>5</code>",
+      "setup:image":
+        "🖼 <b>Set Alert Image URL</b>\n\nReply with a direct image URL (JPEG or PNG). This image will be sent with every buy alert.\n\nExample: <code>https://example.com/logo.png</code>\n\nSend <code>remove</code> to clear the image.",
+      "setup:buy":
+        "🛒 <b>Set Buy Link</b>\n\nReply with the URL users click to buy the token (Raydium, Uniswap, Jupiter, etc.).\n\nExample: <code>https://raydium.io/swap/?outputMint=…</code>",
+      "setup:links":
+        "🔗 <b>Set Extra Links</b>\n\nReply using this format (omit any you don't want):\n<code>dext=https://… screener=https://… trending=https://…</code>",
+    };
+
+    const prompt = prompts[data];
+    if (!prompt) return;
+
+    const sentMsg = await bot.sendMessage(chatId, prompt, {
+      parse_mode: "HTML",
+      reply_markup: { force_reply: true, selective: true },
+    });
+    pendingInput.set(chatId, { field: data, messageId: sentMsg.message_id });
   });
 
-  // ── /test ──────────────────────────────────────────────────────────────────
-  bot.onText(/^\/test(@\S+)?$/, async (msg) => {
+  // ── Text replies: handle pending input from inline buttons ─────────────────
+  bot.on("message", async (msg) => {
+    if (!msg.text || !msg.from) return;
+    if (msg.text.startsWith("/")) return;
+
     const chatId = String(msg.chat.id);
+    const pending = pendingInput.get(chatId);
+    if (!pending) return;
+
+    const admin = await isAdmin(bot, chatId, msg.from.id);
+    if (!admin) return;
+
+    pendingInput.delete(chatId);
+
+    const config = await getOrCreate(chatId, msg.chat.title);
+    const text = msg.text.trim();
+
     try {
-      const config = await getOrCreate(chatId, msg.chat.title);
-      const result = await botRegistry.sendTestAlert(config.id);
-      if (!result.success) {
-        await bot.sendMessage(chatId, `❌ ${result.message}`);
+      switch (pending.field) {
+        case "setup:token": {
+          await bot.sendMessage(chatId, "🔍 Looking up token…");
+          const dexData = await getDexScreenerData(text);
+          const chainId = dexData?.chainId ?? (text.startsWith("0x") ? "ethereum" : "solana");
+          const pairAddress = dexData?.pairAddress ?? null;
+          const dextoolsChain = DEXTOOLS_CHAIN[chainId] ?? chainId;
+          const screenerUrl = pairAddress ? `https://dexscreener.com/${chainId}/${pairAddress}` : null;
+          const dextUrl = pairAddress ? `https://www.dextools.io/app/en/${dextoolsChain}/pair-explorer/${pairAddress}` : null;
+
+          await db.update(botConfigTable).set({
+            tokenAddress: text,
+            tokenName: dexData?.baseToken.name ?? null,
+            tokenSymbol: dexData?.baseToken.symbol ?? null,
+            chain: chainId,
+            screenerUrl,
+            dextUrl,
+            updatedAt: new Date(),
+          }).where(eq(botConfigTable.id, config.id));
+
+          const name = dexData?.baseToken.name ?? text.slice(0, 8) + "…";
+          const sym = dexData?.baseToken.symbol ?? "?";
+          const priceUsd = dexData?.priceUsd ? parseFloat(dexData.priceUsd) : null;
+          const mcap = dexData?.marketCap ?? dexData?.fdv ?? null;
+
+          let reply = dexData
+            ? `✅ <b>${name} (${sym})</b> on <b>${chainId}</b>\n`
+            : `✅ Token set on <b>${chainId}</b>\n`;
+          if (priceUsd) reply += `💵 Price: $${priceUsd.toFixed(6)}\n`;
+          if (mcap) reply += `📊 Market Cap: $${mcap >= 1_000_000 ? (mcap / 1_000_000).toFixed(2) + "M" : (mcap / 1_000).toFixed(0) + "K"}\n`;
+          await bot.sendMessage(chatId, reply, { parse_mode: "HTML" });
+          break;
+        }
+
+        case "setup:min": {
+          const val = parseFloat(text);
+          if (isNaN(val) || val < 0) {
+            await bot.sendMessage(chatId, "❌ Invalid amount. Please send a number like <code>50</code>.", { parse_mode: "HTML" });
+            return;
+          }
+          await db.update(botConfigTable).set({ minBuyUsd: val, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+          await bot.sendMessage(chatId, `✅ Minimum buy set to <b>$${val}</b>`, { parse_mode: "HTML" });
+          break;
+        }
+
+        case "setup:tiers": {
+          const parts = text.split(/\s+/).map(Number);
+          if (parts.length !== 3 || parts.some(isNaN)) {
+            await bot.sendMessage(chatId, "❌ Send exactly 3 numbers, e.g. <code>100 500 1000</code>", { parse_mode: "HTML" });
+            return;
+          }
+          const [t1, t2, t3] = parts as [number, number, number];
+          await db.update(botConfigTable).set({ tier1Min: t1, tier2Min: t2, tier3Min: t3, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+          await bot.sendMessage(chatId, `✅ Tiers: 🟢 $${t1} | 🟢🟢 $${t2} | 🟢🟢🟢 $${t3}`, { parse_mode: "HTML" });
+          break;
+        }
+
+        case "setup:emoji": {
+          const n = parseInt(text);
+          if (isNaN(n) || n < 1 || n > 20) {
+            await bot.sendMessage(chatId, "❌ Send a number between 1 and 20.", { parse_mode: "HTML" });
+            return;
+          }
+          await db.update(botConfigTable).set({ emojiPerTier: n, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+          await bot.sendMessage(chatId, `✅ Emojis per tier: ${"🟢".repeat(n)}`);
+          break;
+        }
+
+        case "setup:image": {
+          if (text.toLowerCase() === "remove") {
+            await db.update(botConfigTable).set({ alertImageUrl: null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+            await bot.sendMessage(chatId, "✅ Alert image removed.");
+          } else if (text.startsWith("http")) {
+            await db.update(botConfigTable).set({ alertImageUrl: text, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+            await bot.sendMessage(chatId, "✅ Alert image set.");
+          } else {
+            await bot.sendMessage(chatId, "❌ Please send a valid URL starting with http.");
+            return;
+          }
+          break;
+        }
+
+        case "setup:buy": {
+          if (!text.startsWith("http")) {
+            await bot.sendMessage(chatId, "❌ Please send a valid URL starting with http.");
+            return;
+          }
+          await db.update(botConfigTable).set({ buyUrl: text, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+          await bot.sendMessage(chatId, "✅ Buy link set.");
+          break;
+        }
+
+        case "setup:links": {
+          const updates: Record<string, string | null | Date> = { updatedAt: new Date() };
+          for (const part of text.split(/\s+/)) {
+            const [key, ...rest] = part.split("=");
+            const val = rest.join("=");
+            if (!val) continue;
+            if (key === "dext") updates["dextUrl"] = val;
+            else if (key === "screener") updates["screenerUrl"] = val;
+            else if (key === "trending") updates["trendingUrl"] = val;
+          }
+          await db.update(botConfigTable).set(updates as Parameters<typeof db.update>[0] extends never ? never : Record<string, unknown>).where(eq(botConfigTable.id, config.id));
+          await bot.sendMessage(chatId, "✅ Links updated.");
+          break;
+        }
       }
+
+      // Refresh the setup panel with updated config
+      const updated = await getOrCreate(chatId);
+      const { running } = botRegistry.getStatus(updated.id);
+      await bot.sendMessage(chatId, statusText(updated, running), {
+        parse_mode: "HTML",
+        reply_markup: setupKeyboard(updated, running),
+      });
+
     } catch (err) {
-      logger.error({ err }, "/test error");
+      logger.error({ err }, "Input handler error");
+      await bot.sendMessage(chatId, "❌ Something went wrong. Please try again.");
     }
   });
 

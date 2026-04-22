@@ -53,7 +53,7 @@ function formatNumber(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-function buildAlertMessage(params: {
+interface AlertParams {
   tokenName: string;
   tokenSymbol: string;
   chainName: string;
@@ -73,7 +73,9 @@ function buildAlertMessage(params: {
   screenerUrl?: string | null;
   buyUrl?: string | null;
   trendingUrl?: string | null;
-}): string {
+}
+
+function buildAlertMessage(params: AlertParams): string {
   const circles = "🟢".repeat(params.tier * params.emojiPerTier);
   const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
   const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
@@ -87,24 +89,35 @@ function buildAlertMessage(params: {
       ? `\n💰 Market Cap ${formatNumber(params.marketCap)}`
       : "";
 
-  const links: string[] = [];
-  if (params.dextUrl) links.push(`<a href="${params.dextUrl}">DexT</a>`);
-  if (params.screenerUrl) links.push(`<a href="${params.screenerUrl}">Screener</a>`);
-  if (params.buyUrl) links.push(`<a href="${params.buyUrl}">Buy</a>`);
-  if (params.trendingUrl) links.push(`<a href="${params.trendingUrl}">Trending</a>`);
-  if (links.length === 0) {
-    links.push(`<a href="${buyerUrl}">Buyer</a>`);
-    links.push(`<a href="${txUrl}">TX</a>`);
-  }
-
   return (
     `<b>${params.tokenName} Buy!</b> <i>${params.chainName}</i>\n` +
     `${circles}\n\n` +
     `🔀 Spent <b>${formatNumber(params.amountUsd)}</b> (<b>${params.amountNative.toFixed(4)} ${params.nativeCurrency}</b>)\n` +
     `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
-    `👤 <a href="${buyerUrl}">Buyer</a> / <a href="${txUrl}">TX</a>${positionLine}${mcapLine}\n\n` +
-    links.join(" | ")
+    `👤 <a href="${buyerUrl}">Buyer</a> · <a href="${txUrl}">TX</a>${positionLine}${mcapLine}`
   );
+}
+
+function buildAlertKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
+  const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
+  const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
+
+  const actionRow: TelegramBot.InlineKeyboardButton[] = [];
+  if (params.buyUrl) actionRow.push({ text: "🛒 Buy", url: params.buyUrl });
+  if (params.dextUrl) actionRow.push({ text: "📊 DexTools", url: params.dextUrl });
+  if (params.screenerUrl) actionRow.push({ text: "📈 Screener", url: params.screenerUrl });
+  if (params.trendingUrl) actionRow.push({ text: "🔥 Trending", url: params.trendingUrl });
+
+  const explorerRow: TelegramBot.InlineKeyboardButton[] = [
+    { text: "👤 Buyer", url: buyerUrl },
+    { text: "🔗 TX", url: txUrl },
+  ];
+
+  const rows: TelegramBot.InlineKeyboardButton[][] = [];
+  if (actionRow.length > 0) rows.push(actionRow);
+  rows.push(explorerRow);
+
+  return { inline_keyboard: rows };
 }
 
 interface BotInstance {
@@ -282,7 +295,7 @@ class BotRegistry {
     });
 
     const tgBot = new TelegramBot(token, { polling: false });
-    const message = buildAlertMessage({
+    const alertParams: AlertParams = {
       tokenName: config.tokenName ?? dexData?.baseToken.name ?? "Token",
       tokenSymbol: config.tokenSymbol ?? dexData?.baseToken.symbol ?? "TKN",
       chainName: chainConfig.name,
@@ -302,17 +315,21 @@ class BotRegistry {
       screenerUrl: config.screenerUrl,
       buyUrl: config.buyUrl,
       trendingUrl: config.trendingUrl,
-    });
+    };
+    const message = buildAlertMessage(alertParams);
+    const keyboard = buildAlertKeyboard(alertParams);
 
     if (config.alertImageUrl) {
       await tgBot.sendPhoto(config.chatId, config.alertImageUrl, {
         caption: message,
         parse_mode: "HTML",
+        reply_markup: keyboard,
       });
     } else {
       await tgBot.sendMessage(config.chatId, message, {
         parse_mode: "HTML",
         disable_web_page_preview: true,
+        reply_markup: keyboard,
       });
     }
 
