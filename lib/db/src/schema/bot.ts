@@ -5,13 +5,15 @@ import {
   integer,
   real,
   timestamp,
-  bigint,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
 export const botConfigTable = pgTable("bot_config", {
   id: serial("id").primaryKey(),
+  name: text("name").notNull().default("My Bot"),
+  isActive: boolean("is_active").notNull().default(false),
   telegramToken: text("telegram_token"),
   chatId: text("chat_id"),
   tokenAddress: text("token_address"),
@@ -35,6 +37,7 @@ export const botConfigTable = pgTable("bot_config", {
 
 export const alertsTable = pgTable("alerts", {
   id: serial("id").primaryKey(),
+  botConfigId: integer("bot_config_id").references(() => botConfigTable.id),
   txSignature: text("tx_signature"),
   chain: text("chain").notNull().default("solana"),
   buyerAddress: text("buyer_address").notNull(),

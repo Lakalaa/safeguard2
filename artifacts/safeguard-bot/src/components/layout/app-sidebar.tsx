@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter"
-import { ShieldCheck, LayoutDashboard, Activity, Settings, Sun, Moon } from "lucide-react"
+import { ShieldCheck, LayoutDashboard, Sun, Moon } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -15,9 +15,7 @@ import {
 import { useTheme } from "@/components/theme-provider"
 
 const navItems = [
-  { title: "Dashboard", href: "/", icon: LayoutDashboard },
-  { title: "Buy Alerts", href: "/alerts", icon: Activity },
-  { title: "Settings", href: "/settings", icon: Settings },
+  { title: "My Bots", href: "/", icon: LayoutDashboard },
 ]
 
 export function AppSidebar() {
@@ -33,7 +31,7 @@ export function AppSidebar() {
           </div>
           <div>
             <div className="text-sm leading-none">Buy Alert Bot</div>
-            <div className="text-[10px] font-normal text-muted-foreground leading-none mt-0.5">Solana</div>
+            <div className="text-[10px] font-normal text-muted-foreground leading-none mt-0.5">Multi-chain</div>
           </div>
         </div>
       </SidebarHeader>

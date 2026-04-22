@@ -1,130 +1,114 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
-  version: 0.1.0
-  description: Crypto Buy Alert Bot API
+  version: 0.2.0
+  description: Multi-bot Buy Alert API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
-    description: Health operations
-  - name: bot
-    description: Bot management
+  - name: bots
   - name: alerts
-    description: Buy alert history
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
-      summary: Health check
       responses:
         "200":
-          description: Healthy
+          description: OK
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
 
-  /bot/config:
+  /bots:
     get:
-      operationId: getBotConfig
-      tags: [bot]
-      summary: Get bot configuration
+      operationId: listBots
+      tags: [bots]
+      summary: List all bot configs with live status
       responses:
         "200":
-          description: Bot configuration
+          description: List of bots
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BotConfig"
-    put:
-      operationId: updateBotConfig
-      tags: [bot]
-      summary: Update bot configuration
+                type: array
+                items:
+                  $ref: "#/components/schemas/BotSummary"
+    post:
+      operationId: createBot
+      tags: [bots]
+      summary: Create a new bot config
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                telegramToken:
-                  type: string
-                  nullable: true
-                chatId:
-                  type: string
-                  nullable: true
-                tokenAddress:
-                  type: string
-                  nullable: true
-                tokenName:
-                  type: string
-                  nullable: true
-                tokenSymbol:
-                  type: string
-                  nullable: true
-                chain:
-                  type: string
-                  nullable: true
-                minBuyUsd:
-                  type: number
-                  nullable: true
-                alertImageUrl:
-                  type: string
-                  nullable: true
-                dextUrl:
-                  type: string
-                  nullable: true
-                screenerUrl:
-                  type: string
-                  nullable: true
-                buyUrl:
-                  type: string
-                  nullable: true
-                trendingUrl:
-                  type: string
-                  nullable: true
-                emojiPerTier:
-                  type: integer
-                  nullable: true
-                tier1Min:
-                  type: number
-                  nullable: true
-                tier2Min:
-                  type: number
-                  nullable: true
-                tier3Min:
-                  type: number
-                  nullable: true
+              $ref: "#/components/schemas/BotConfigInput"
       responses:
         "200":
-          description: Updated config
+          description: Created bot
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BotConfig"
+                $ref: "#/components/schemas/BotDetail"
 
-  /bot/status:
+  /bots/{id}:
     get:
-      operationId: getBotStatus
-      tags: [bot]
-      summary: Get bot running status
+      operationId: getBot
+      tags: [bots]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
         "200":
-          description: Bot status
+          description: Bot detail
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BotStatus"
+                $ref: "#/components/schemas/BotDetail"
+    put:
+      operationId: updateBot
+      tags: [bots]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BotConfigInput"
+      responses:
+        "200":
+          description: Updated bot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotDetail"
+    delete:
+      operationId: deleteBot
+      tags: [bots]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                required: [ok]
 
-  /bot/start:
+  /bots/{id}/start:
     post:
       operationId: startBot
-      tags: [bot]
-      summary: Start the bot
+      tags: [bots]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
         "200":
           description: Bot started
@@ -133,11 +117,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/BotStatus"
 
-  /bot/stop:
+  /bots/{id}/stop:
     post:
       operationId: stopBot
-      tags: [bot]
-      summary: Stop the bot
+      tags: [bots]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
         "200":
           description: Bot stopped
@@ -146,36 +131,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/BotStatus"
 
-  /bot/test:
+  /bots/{id}/test:
     post:
-      operationId: testAlert
-      tags: [bot]
-      summary: Send a test alert
+      operationId: testBot
+      tags: [bots]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
         "200":
-          description: Test sent
+          description: Test result
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  success:
-                    type: boolean
-                  message:
-                    type: string
+                  success: { type: boolean }
+                  message: { type: string }
                 required: [success, message]
 
-  /alerts:
+  /bots/{id}/alerts:
     get:
-      operationId: listAlerts
+      operationId: getBotAlerts
       tags: [alerts]
-      summary: List recent buy alerts
       parameters:
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 50
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
       responses:
         "200":
           description: List of alerts
@@ -186,200 +166,157 @@ paths:
                 items:
                   $ref: "#/components/schemas/BuyAlert"
 
-  /token-info:
+  /bots/{id}/stats:
     get:
-      operationId: getTokenInfo
-      tags: [bot]
-      summary: Fetch token info from DexScreener for any Solana token
-      parameters:
-        - name: address
-          in: query
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Token info
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TokenInfo"
-
-  /stats:
-    get:
-      operationId: getStats
+      operationId: getBotStats
       tags: [alerts]
-      summary: Get aggregate stats
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
         "200":
-          description: Stats
+          description: Aggregate stats
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Stats"
+
+  /token-info:
+    get:
+      operationId: getTokenInfo
+      tags: [bots]
+      parameters:
+        - { name: address, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Token info from DexScreener
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenInfo"
 
 components:
   schemas:
     HealthStatus:
       type: object
       properties:
-        status:
-          type: string
+        status: { type: string }
       required: [status]
 
-    BotConfig:
+    BotConfigInput:
       type: object
       properties:
-        hasTelegramToken:
-          type: boolean
-        telegramTokenPreview:
-          type: string
-          nullable: true
-        chatId:
-          type: string
-          nullable: true
-        tokenAddress:
-          type: string
-          nullable: true
-        tokenName:
-          type: string
-          nullable: true
-        tokenSymbol:
-          type: string
-          nullable: true
-        chain:
-          type: string
-          nullable: true
-        minBuyUsd:
-          type: number
-        alertImageUrl:
-          type: string
-          nullable: true
-        dextUrl:
-          type: string
-          nullable: true
-        screenerUrl:
-          type: string
-          nullable: true
-        buyUrl:
-          type: string
-          nullable: true
-        trendingUrl:
-          type: string
-          nullable: true
-        emojiPerTier:
-          type: integer
-        tier1Min:
-          type: number
-        tier2Min:
-          type: number
-        tier3Min:
-          type: number
-      required:
-        [hasTelegramToken, minBuyUsd, emojiPerTier, tier1Min, tier2Min, tier3Min]
+        name: { type: string, nullable: true }
+        telegramToken: { type: string, nullable: true }
+        chatId: { type: string, nullable: true }
+        tokenAddress: { type: string, nullable: true }
+        tokenName: { type: string, nullable: true }
+        tokenSymbol: { type: string, nullable: true }
+        chain: { type: string, nullable: true }
+        minBuyUsd: { type: number, nullable: true }
+        alertImageUrl: { type: string, nullable: true }
+        dextUrl: { type: string, nullable: true }
+        screenerUrl: { type: string, nullable: true }
+        buyUrl: { type: string, nullable: true }
+        trendingUrl: { type: string, nullable: true }
+        emojiPerTier: { type: integer, nullable: true }
+        tier1Min: { type: number, nullable: true }
+        tier2Min: { type: number, nullable: true }
+        tier3Min: { type: number, nullable: true }
+
+    BotDetail:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        isActive: { type: boolean }
+        hasTelegramToken: { type: boolean }
+        telegramTokenPreview: { type: string, nullable: true }
+        chatId: { type: string, nullable: true }
+        tokenAddress: { type: string, nullable: true }
+        tokenName: { type: string, nullable: true }
+        tokenSymbol: { type: string, nullable: true }
+        chain: { type: string, nullable: true }
+        minBuyUsd: { type: number }
+        alertImageUrl: { type: string, nullable: true }
+        dextUrl: { type: string, nullable: true }
+        screenerUrl: { type: string, nullable: true }
+        buyUrl: { type: string, nullable: true }
+        trendingUrl: { type: string, nullable: true }
+        emojiPerTier: { type: integer }
+        tier1Min: { type: number }
+        tier2Min: { type: number }
+        tier3Min: { type: number }
+        running: { type: boolean }
+        lastCheckAt: { type: string, format: date-time, nullable: true }
+        error: { type: string, nullable: true }
+      required: [id, name, isActive, hasTelegramToken, minBuyUsd, emojiPerTier, tier1Min, tier2Min, tier3Min, running]
+
+    BotSummary:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        isActive: { type: boolean }
+        tokenName: { type: string, nullable: true }
+        tokenSymbol: { type: string, nullable: true }
+        tokenAddress: { type: string, nullable: true }
+        chain: { type: string, nullable: true }
+        running: { type: boolean }
+        lastCheckAt: { type: string, format: date-time, nullable: true }
+        error: { type: string, nullable: true }
+        alertCount: { type: integer }
+      required: [id, name, isActive, running, alertCount]
 
     BotStatus:
       type: object
       properties:
-        running:
-          type: boolean
-        monitoringToken:
-          type: string
-          nullable: true
-        lastCheckAt:
-          type: string
-          format: date-time
-          nullable: true
-        error:
-          type: string
-          nullable: true
-      required: [running]
+        id: { type: integer }
+        running: { type: boolean }
+        lastCheckAt: { type: string, format: date-time, nullable: true }
+        error: { type: string, nullable: true }
+      required: [id, running]
 
     BuyAlert:
       type: object
       properties:
-        id:
-          type: integer
-        txSignature:
-          type: string
-          nullable: true
-        chain:
-          type: string
-        buyerAddress:
-          type: string
-        amountUsd:
-          type: number
-        amountNative:
-          type: number
-        nativeCurrency:
-          type: string
-        tokensReceived:
-          type: number
-        marketCap:
-          type: number
-          nullable: true
-        priceChangePct:
-          type: number
-          nullable: true
-        tier:
-          type: integer
-        sentAt:
-          type: string
-          format: date-time
-      required:
-        [id, chain, buyerAddress, amountUsd, amountNative, nativeCurrency, tokensReceived, tier, sentAt]
-
-    TokenInfo:
-      type: object
-      properties:
-        address:
-          type: string
-        name:
-          type: string
-          nullable: true
-        symbol:
-          type: string
-          nullable: true
-        priceUsd:
-          type: number
-          nullable: true
-        marketCap:
-          type: number
-          nullable: true
-        priceChange24h:
-          type: number
-          nullable: true
-        liquidity:
-          type: number
-          nullable: true
-        dexscreenerUrl:
-          type: string
-          nullable: true
-        dextoolsUrl:
-          type: string
-          nullable: true
-        raydiumUrl:
-          type: string
-          nullable: true
-        pairAddress:
-          type: string
-          nullable: true
-        found:
-          type: boolean
-      required: [address, found]
+        id: { type: integer }
+        txSignature: { type: string, nullable: true }
+        chain: { type: string }
+        buyerAddress: { type: string }
+        amountUsd: { type: number }
+        amountNative: { type: number }
+        nativeCurrency: { type: string }
+        tokensReceived: { type: number }
+        marketCap: { type: number, nullable: true }
+        priceChangePct: { type: number, nullable: true }
+        tier: { type: integer }
+        sentAt: { type: string, format: date-time }
+      required: [id, chain, buyerAddress, amountUsd, amountNative, nativeCurrency, tokensReceived, tier, sentAt]
 
     Stats:
       type: object
       properties:
-        totalAlerts:
-          type: integer
-        totalVolumeUsd:
-          type: number
-        avgBuyUsd:
-          type: number
-        biggestBuyUsd:
-          type: number
-        alertsToday:
-          type: integer
-      required:
-        [totalAlerts, totalVolumeUsd, avgBuyUsd, biggestBuyUsd, alertsToday]
+        totalAlerts: { type: integer }
+        totalVolumeUsd: { type: number }
+        avgBuyUsd: { type: number }
+        biggestBuyUsd: { type: number }
+        alertsToday: { type: integer }
+      required: [totalAlerts, totalVolumeUsd, avgBuyUsd, biggestBuyUsd, alertsToday]
+
+    TokenInfo:
+      type: object
+      properties:
+        address: { type: string }
+        name: { type: string, nullable: true }
+        symbol: { type: string, nullable: true }
+        priceUsd: { type: number, nullable: true }
+        marketCap: { type: number, nullable: true }
+        priceChange24h: { type: number, nullable: true }
+        liquidity: { type: number, nullable: true }
+        dexscreenerUrl: { type: string, nullable: true }
+        dextoolsUrl: { type: string, nullable: true }
+        raydiumUrl: { type: string, nullable: true }
+        pairAddress: { type: string, nullable: true }
+        chainId: { type: string, nullable: true }
+        found: { type: boolean }
+      required: [address, found]

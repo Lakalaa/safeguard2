@@ -6,8 +6,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { AppLayout } from "@/components/layout/app-layout"
 import NotFound from "@/pages/not-found"
 import Dashboard from "@/pages/dashboard"
-import Alerts from "@/pages/alerts"
-import Settings from "@/pages/settings"
+import BotDetail from "@/pages/bot-detail"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -19,8 +18,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
-      <Route path="/alerts" component={Alerts} />
-      <Route path="/settings" component={Settings} />
+      <Route path="/bots/:id" component={BotDetail} />
       <Route component={NotFound} />
     </Switch>
   )
