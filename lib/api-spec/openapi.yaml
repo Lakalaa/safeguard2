@@ -3,20 +3,23 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Crypto Buy Alert Bot API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: bot
+    description: Bot management
+  - name: alerts
+    description: Buy alert history
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +27,178 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /bot/config:
+    get:
+      operationId: getBotConfig
+      tags: [bot]
+      summary: Get bot configuration
+      responses:
+        "200":
+          description: Bot configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotConfig"
+    put:
+      operationId: updateBotConfig
+      tags: [bot]
+      summary: Update bot configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                telegramToken:
+                  type: string
+                  nullable: true
+                chatId:
+                  type: string
+                  nullable: true
+                tokenAddress:
+                  type: string
+                  nullable: true
+                tokenName:
+                  type: string
+                  nullable: true
+                tokenSymbol:
+                  type: string
+                  nullable: true
+                chain:
+                  type: string
+                  nullable: true
+                minBuyUsd:
+                  type: number
+                  nullable: true
+                alertImageUrl:
+                  type: string
+                  nullable: true
+                dextUrl:
+                  type: string
+                  nullable: true
+                screenerUrl:
+                  type: string
+                  nullable: true
+                buyUrl:
+                  type: string
+                  nullable: true
+                trendingUrl:
+                  type: string
+                  nullable: true
+                emojiPerTier:
+                  type: integer
+                  nullable: true
+                tier1Min:
+                  type: number
+                  nullable: true
+                tier2Min:
+                  type: number
+                  nullable: true
+                tier3Min:
+                  type: number
+                  nullable: true
+      responses:
+        "200":
+          description: Updated config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotConfig"
+
+  /bot/status:
+    get:
+      operationId: getBotStatus
+      tags: [bot]
+      summary: Get bot running status
+      responses:
+        "200":
+          description: Bot status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
+  /bot/start:
+    post:
+      operationId: startBot
+      tags: [bot]
+      summary: Start the bot
+      responses:
+        "200":
+          description: Bot started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
+  /bot/stop:
+    post:
+      operationId: stopBot
+      tags: [bot]
+      summary: Stop the bot
+      responses:
+        "200":
+          description: Bot stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
+  /bot/test:
+    post:
+      operationId: testAlert
+      tags: [bot]
+      summary: Send a test alert
+      responses:
+        "200":
+          description: Test sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                required: [success, message]
+
+  /alerts:
+    get:
+      operationId: listAlerts
+      tags: [alerts]
+      summary: List recent buy alerts
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: List of alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BuyAlert"
+
+  /stats:
+    get:
+      operationId: getStats
+      tags: [alerts]
+      summary: Get aggregate stats
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stats"
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +206,118 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    BotConfig:
+      type: object
+      properties:
+        hasTelegramToken:
+          type: boolean
+        telegramTokenPreview:
+          type: string
+          nullable: true
+        chatId:
+          type: string
+          nullable: true
+        tokenAddress:
+          type: string
+          nullable: true
+        tokenName:
+          type: string
+          nullable: true
+        tokenSymbol:
+          type: string
+          nullable: true
+        chain:
+          type: string
+          nullable: true
+        minBuyUsd:
+          type: number
+        alertImageUrl:
+          type: string
+          nullable: true
+        dextUrl:
+          type: string
+          nullable: true
+        screenerUrl:
+          type: string
+          nullable: true
+        buyUrl:
+          type: string
+          nullable: true
+        trendingUrl:
+          type: string
+          nullable: true
+        emojiPerTier:
+          type: integer
+        tier1Min:
+          type: number
+        tier2Min:
+          type: number
+        tier3Min:
+          type: number
+      required:
+        [hasTelegramToken, minBuyUsd, emojiPerTier, tier1Min, tier2Min, tier3Min]
+
+    BotStatus:
+      type: object
+      properties:
+        running:
+          type: boolean
+        monitoringToken:
+          type: string
+          nullable: true
+        lastCheckAt:
+          type: string
+          format: date-time
+          nullable: true
+        error:
+          type: string
+          nullable: true
+      required: [running]
+
+    BuyAlert:
+      type: object
+      properties:
+        id:
+          type: integer
+        txSignature:
+          type: string
+          nullable: true
+        buyerAddress:
+          type: string
+        amountUsd:
+          type: number
+        amountNative:
+          type: number
+        tokensReceived:
+          type: number
+        marketCap:
+          type: number
+          nullable: true
+        priceChangePct:
+          type: number
+          nullable: true
+        tier:
+          type: integer
+        sentAt:
+          type: string
+          format: date-time
+      required:
+        [id, buyerAddress, amountUsd, amountNative, tokensReceived, tier, sentAt]
+
+    Stats:
+      type: object
+      properties:
+        totalAlerts:
+          type: integer
+        totalVolumeUsd:
+          type: number
+        avgBuyUsd:
+          type: number
+        biggestBuyUsd:
+          type: number
+        alertsToday:
+          type: integer
+      required:
+        [totalAlerts, totalVolumeUsd, avgBuyUsd, biggestBuyUsd, alertsToday]
