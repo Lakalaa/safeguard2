@@ -146,7 +146,6 @@ export default function BotDetail() {
       if (tokenInfo.chainId) setValue("chain", tokenInfo.chainId)
       if (tokenInfo.dexscreenerUrl) setValue("screenerUrl", tokenInfo.dexscreenerUrl)
       if (tokenInfo.dextoolsUrl) setValue("dextUrl", tokenInfo.dextoolsUrl)
-      if (tokenInfo.raydiumUrl) setValue("buyUrl", tokenInfo.raydiumUrl)
       toast({ title: "Token found", description: `${tokenInfo.name} (${tokenInfo.symbol}) auto-filled.` })
     }
   }, [tokenInfo, setValue, toast])
@@ -482,15 +481,15 @@ export default function BotDetail() {
               <CardContent className="space-y-4">
                 {(
                   [
-                    ["dextUrl", "DexTools URL"],
-                    ["screenerUrl", "DexScreener URL"],
-                    ["buyUrl", "Buy URL"],
-                    ["trendingUrl", "Trending URL"],
+                    ["dextUrl", "DexTools URL", "https://dextools.io/… (auto-filled)"],
+                    ["screenerUrl", "DexScreener URL", "https://dexscreener.com/… (auto-filled)"],
+                    ["buyUrl", "Buy URL", "Your preferred exchange — Raydium, Jupiter, Uniswap, or any link"],
+                    ["trendingUrl", "Trending URL", "https://…"],
                   ] as const
-                ).map(([field, label]) => (
+                ).map(([field, label, placeholder]) => (
                   <div key={field} className="space-y-2">
                     <Label>{label}</Label>
-                    <Input {...register(field)} placeholder="https://…" />
+                    <Input {...register(field)} placeholder={placeholder} />
                   </div>
                 ))}
                 <p className="text-xs text-muted-foreground">
