@@ -85,10 +85,17 @@ interface AlertParams {
 
 function buildAlertMessage(params: AlertParams): string {
   const emoji = params.alertEmoji || "🟢";
-  const count = Math.max(1, params.emojiPerTier);
+  const max = Math.max(1, params.emojiPerTier);
 
-  // Emojis scale with tier: tier 1 = count, tier 2 = count×2, tier 3 = count×3
-  const emojiBar = emoji.repeat(count * params.tier);
+  // Emoji count scales by tier:
+  //   Tier 1 (small) → 1 emoji always (no matter what emojiPerTier is)
+  //   Tier 2 (medium) → half of max, minimum 2
+  //   Tier 3 (whale) → full emojiPerTier
+  const emojiCount =
+    params.tier === 3 ? max :
+    params.tier === 2 ? Math.max(2, Math.round(max / 2)) :
+    1;
+  const emojiBar = emoji.repeat(emojiCount);
 
   // Whale label for tier 3
   const buyLabel = params.tier === 3 ? "🐋 Whale Buy!" : "New Buy!";
@@ -109,6 +116,14 @@ function buildAlertMessage(params: AlertParams): string {
     ? `\n📊 24h: <b>${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(1)}%</b>`
     : "";
 
+  // Action links embedded in text (NOT inline buttons)
+  const linkParts: string[] = [];
+  if (params.buyUrl) linkParts.push(`<a href="${params.buyUrl}">🛒 Buy</a>`);
+  if (params.dextUrl) linkParts.push(`<a href="${params.dextUrl}">📊 DexTools</a>`);
+  if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">📈 DexScreener</a>`);
+  if (params.trendingUrl) linkParts.push(`<a href="${params.trendingUrl}">🔥 Trending</a>`);
+  const linksLine = linkParts.length > 0 ? `\n\n${linkParts.join("  |  ")}` : "";
+
   return (
     `${emojiBar}\n` +
     `<b>${params.tokenName} — ${buyLabel}</b>\n` +
@@ -118,30 +133,22 @@ function buildAlertMessage(params: AlertParams): string {
     `👤 Buyer: <a href="${buyerUrl}">${shortBuyer}</a>` +
     mcapLine +
     priceChangeLine +
-    `\n\n🔗 <a href="${txUrl}">View TX</a>`
+    linksLine
   );
 }
 
-function buildAlertKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
+function buildAlertKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup | undefined {
+  // Action links (Buy, DexTools, Screener, Trending) are embedded as hyperlinks
+  // in the message text. The keyboard only shows explorer buttons.
   const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
   const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
 
-  const actionRow: TelegramBot.InlineKeyboardButton[] = [];
-  if (params.buyUrl) actionRow.push({ text: "🛒 Buy", url: params.buyUrl });
-  if (params.dextUrl) actionRow.push({ text: "📊 DexTools", url: params.dextUrl });
-  if (params.screenerUrl) actionRow.push({ text: "📈 Screener", url: params.screenerUrl });
-  if (params.trendingUrl) actionRow.push({ text: "🔥 Trending", url: params.trendingUrl });
-
-  const explorerRow: TelegramBot.InlineKeyboardButton[] = [
-    { text: "👤 Buyer", url: buyerUrl },
-    { text: "🔗 TX", url: txUrl },
-  ];
-
-  const rows: TelegramBot.InlineKeyboardButton[][] = [];
-  if (actionRow.length > 0) rows.push(actionRow);
-  rows.push(explorerRow);
-
-  return { inline_keyboard: rows };
+  return {
+    inline_keyboard: [[
+      { text: "👤 Buyer Wallet", url: buyerUrl },
+      { text: "🔗 View TX", url: txUrl },
+    ]],
+  };
 }
 
 interface BotInstance {
