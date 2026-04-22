@@ -65,7 +65,7 @@ interface AlertParams {
   tokenSymbol: string;
   chainName: string;
   tier: number;
-  emojiPerTier: number;
+  minBuyUsd: number;   // used as the emoji scale unit: emojiCount = floor(amountUsd / minBuyUsd)
   alertEmoji: string;
   amountUsd: number;
   amountNative: number;
@@ -85,16 +85,13 @@ interface AlertParams {
 
 function buildAlertMessage(params: AlertParams): string {
   const emoji = params.alertEmoji || "🟢";
-  const max = Math.max(1, params.emojiPerTier);
 
-  // Emoji count scales by tier:
-  //   Tier 1 (small)  → 1 emoji
-  //   Tier 2 (medium) → half of max, min 2
-  //   Tier 3 (whale)  → full emojiPerTier
-  const emojiCount =
-    params.tier === 3 ? max :
-    params.tier === 2 ? Math.max(2, Math.round(max / 2)) :
-    1;
+  // Emoji count scales linearly with buy size relative to the minimum buy:
+  //   count = floor(amountUsd / minBuyUsd), capped at 200 to avoid message limits.
+  // Example: minBuy=$10, buy=$106 → 10 emojis; buy=$1,524 → 152 emojis.
+  const minBuy = params.minBuyUsd > 0 ? params.minBuyUsd : 1;
+  const rawCount = Math.floor(params.amountUsd / minBuy);
+  const emojiCount = Math.max(1, Math.min(rawCount, 200));
   const emojiBar = emoji.repeat(emojiCount);
 
   const buyLabel = params.tier === 3 ? "🐋 Whale Buy!" : "Buy!";
@@ -320,7 +317,7 @@ class BotRegistry {
       tokenSymbol: config.tokenSymbol ?? dexData?.baseToken.symbol ?? "TKN",
       chainName: chainConfig.name,
       tier,
-      emojiPerTier: config.emojiPerTier,
+      minBuyUsd: config.minBuyUsd ?? 1,
       alertEmoji: config.alertEmoji || "🟢",
       amountUsd,
       amountNative: event.amountNative,
