@@ -59,6 +59,7 @@ interface AlertParams {
   chainName: string;
   tier: number;
   emojiPerTier: number;
+  alertEmoji: string;
   amountUsd: number;
   amountNative: number;
   nativeCurrency: string;
@@ -76,7 +77,8 @@ interface AlertParams {
 }
 
 function buildAlertMessage(params: AlertParams): string {
-  const circles = "🟢".repeat(params.tier * params.emojiPerTier);
+  const emoji = params.alertEmoji || "🟢";
+  const circles = emoji.repeat(params.tier * params.emojiPerTier);
   const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
   const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
 
@@ -301,6 +303,7 @@ class BotRegistry {
       chainName: chainConfig.name,
       tier,
       emojiPerTier: config.emojiPerTier,
+      alertEmoji: config.alertEmoji || "🟢",
       amountUsd,
       amountNative: event.amountNative,
       nativeCurrency: chainConfig.nativeCurrency,
@@ -319,12 +322,20 @@ class BotRegistry {
     const message = buildAlertMessage(alertParams);
     const keyboard = buildAlertKeyboard(alertParams);
 
-    if (config.alertImageUrl) {
-      await tgBot.sendPhoto(config.chatId, config.alertImageUrl, {
-        caption: message,
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
+    const mediaFileId = config.alertMediaFileId;
+    const mediaType = config.alertMediaType ?? "photo";
+    const mediaUrl = config.alertImageUrl;
+
+    if (mediaFileId || mediaUrl) {
+      const mediaSrc = (mediaFileId ?? mediaUrl) as string;
+      const mediaOpts = { caption: message, parse_mode: "HTML" as const, reply_markup: keyboard };
+      if (mediaType === "video") {
+        await tgBot.sendVideo(config.chatId, mediaSrc, mediaOpts);
+      } else if (mediaType === "animation") {
+        await tgBot.sendAnimation(config.chatId, mediaSrc, mediaOpts);
+      } else {
+        await tgBot.sendPhoto(config.chatId, mediaSrc, mediaOpts);
+      }
     } else {
       await tgBot.sendMessage(config.chatId, message, {
         parse_mode: "HTML",

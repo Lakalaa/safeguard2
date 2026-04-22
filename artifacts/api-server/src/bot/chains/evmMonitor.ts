@@ -102,6 +102,7 @@ export class EvmMonitor {
 
     // Get ETH/BNB/etc. spent from the tx
     let amountNative = 0;
+    let amountUsd = 0;
     if (this.provider) {
       try {
         const tx = await this.provider.getTransaction(txHash);
@@ -110,24 +111,15 @@ export class EvmMonitor {
           const valueSent = Number(ethers.formatEther(tx.value));
           if (valueSent > 0) {
             amountNative = valueSent;
-          } else {
-            // For token→token routes, estimate from gas * gasPrice as min cost proxy
-            // This is imperfect; real amount requires decoding swap calldata
-            const receipt = await this.provider.getTransactionReceipt(txHash);
-            if (receipt) {
-              const gasCost = Number(
-                ethers.formatEther(BigInt(receipt.gasUsed) * (tx.gasPrice ?? BigInt(0))),
-              );
-              // Can't reliably infer native amount for token→token; set to 0 (USD-only display)
-              amountNative = gasCost;
-            }
+            const nativePrice = await getNativePrice(this.chainConfig.nativeCoinGeckoId);
+            amountUsd = amountNative * nativePrice;
           }
+          // For WETH/token→token routes tx.value is 0.
+          // We set amountNative=0, amountUsd=0 and let onBuyEvent compute
+          // USD from tokensReceived * tokenPriceUsd (DexScreener price).
         }
       } catch {}
     }
-
-    const nativePrice = await getNativePrice(this.chainConfig.nativeCoinGeckoId);
-    const amountUsd = amountNative * nativePrice;
 
     this.onBuy({
       signature: txHash,
