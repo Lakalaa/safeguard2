@@ -117,6 +117,11 @@ interface BotInstance {
   dexCache: { data: DexScreenerPair | null; fetchedAt: number };
 }
 
+/** Returns the bot token to use: stored in DB first, then TELEGRAM_BOT_TOKEN env var fallback */
+function resolveToken(config: BotConfig | undefined): string | null {
+  return config?.telegramToken || process.env["TELEGRAM_BOT_TOKEN"] || null;
+}
+
 class BotRegistry {
   private instances = new Map<number, BotInstance>();
 
@@ -141,7 +146,7 @@ class BotRegistry {
       .limit(1);
 
     if (!config) return { running: false, error: "Bot config not found." };
-    if (!config.telegramToken) return { running: false, error: "Telegram bot token not set." };
+    if (!resolveToken(config)) return { running: false, error: "Telegram bot token not set." };
     if (!config.tokenAddress) return { running: false, error: "Token address not set." };
     if (!config.chatId) return { running: false, error: "Telegram chat ID not set." };
 
@@ -241,7 +246,8 @@ class BotRegistry {
       .from(botConfigTable)
       .where(eq(botConfigTable.id, configId))
       .limit(1);
-    if (!config?.telegramToken || !config?.chatId) return;
+    const token = resolveToken(config);
+    if (!token || !config?.chatId) return;
 
     const chainConfig = getChainConfig(chainId);
     if (!chainConfig) return;
@@ -275,7 +281,7 @@ class BotRegistry {
       tier,
     });
 
-    const tgBot = new TelegramBot(config.telegramToken, { polling: false });
+    const tgBot = new TelegramBot(token, { polling: false });
     const message = buildAlertMessage({
       tokenName: config.tokenName ?? dexData?.baseToken.name ?? "Token",
       tokenSymbol: config.tokenSymbol ?? dexData?.baseToken.symbol ?? "TKN",
@@ -328,12 +334,13 @@ class BotRegistry {
       .where(eq(botConfigTable.id, configId))
       .limit(1);
 
-    if (!config?.telegramToken || !config?.chatId) {
+    const token = resolveToken(config);
+    if (!token || !config?.chatId) {
       return { success: false, message: "Bot token or chat ID not configured." };
     }
 
     try {
-      const tgBot = new TelegramBot(config.telegramToken, { polling: false });
+      const tgBot = new TelegramBot(token, { polling: false });
       const tokenName = config.tokenName ?? "your token";
       const chainId = config.chain ?? "solana";
       const chainConfig = getChainConfig(chainId);
