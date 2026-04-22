@@ -8,8 +8,9 @@ const ERC20_ABI = [
   "function decimals() view returns (uint8)",
 ];
 
-const POLL_INTERVAL_MS = 6_000;
-const BLOCK_LOOKBACK = 8;
+const POLL_INTERVAL_MS = 6_000;  // poll every 6 seconds
+const MAX_BLOCKS_PER_POLL = 30;  // max blocks fetched per poll
+const START_LOOKBACK = 5;         // blocks to look back on startup
 
 export interface BuyEvent {
   signature: string;
@@ -44,8 +45,27 @@ export class EvmMonitor {
     this.onBuy = onBuy;
   }
 
+  private async makeProvider(): Promise<ethers.JsonRpcProvider> {
+    // Try primary RPC first, fall back to secondary if it fails
+    const primary = new ethers.JsonRpcProvider(this.chainConfig.rpcHttp);
+    try {
+      await primary.getBlockNumber();
+      logger.info({ rpc: this.chainConfig.rpcHttp }, `[${this.chainConfig.name}] Connected to primary RPC`);
+      return primary;
+    } catch {
+      if (this.chainConfig.rpcHttpFallback) {
+        logger.warn(
+          { primary: this.chainConfig.rpcHttp, fallback: this.chainConfig.rpcHttpFallback },
+          `[${this.chainConfig.name}] Primary RPC failed — using fallback`,
+        );
+        return new ethers.JsonRpcProvider(this.chainConfig.rpcHttpFallback);
+      }
+      throw new Error(`Primary RPC ${this.chainConfig.rpcHttp} failed and no fallback configured`);
+    }
+  }
+
   async start(): Promise<void> {
-    this.provider = new ethers.JsonRpcProvider(this.chainConfig.rpcHttp);
+    this.provider = await this.makeProvider();
     this.contract = new ethers.Contract(this.tokenAddress, ERC20_ABI, this.provider);
 
     try {
@@ -54,18 +74,19 @@ export class EvmMonitor {
       this.decimals = 18;
     }
 
-    // Start from a few blocks before current so we don't miss recent buys
     try {
-      this.lastProcessedBlock = (await this.provider.getBlockNumber()) - BLOCK_LOOKBACK;
-    } catch {
+      const latest = await this.provider.getBlockNumber();
+      this.lastProcessedBlock = Math.max(0, latest - START_LOOKBACK);
+      logger.info(
+        { chain: this.chainConfig.name, token: this.tokenAddress, pair: this.pairAddress, startBlock: this.lastProcessedBlock },
+        `[${this.chainConfig.name}] EVM monitor started`,
+      );
+    } catch (err) {
+      logger.warn({ err }, `[${this.chainConfig.name}] Could not get start block`);
       this.lastProcessedBlock = 0;
     }
 
     this.running = true;
-    logger.info(
-      { chain: this.chainConfig.name, token: this.tokenAddress, pair: this.pairAddress },
-      `[${this.chainConfig.name}] EVM monitor started (HTTP polling)`,
-    );
     this.schedulePoll();
   }
 
@@ -77,28 +98,42 @@ export class EvmMonitor {
     }
     this.provider = null;
     this.contract = null;
+    logger.info({ chain: this.chainConfig.name }, `[${this.chainConfig.name}] EVM monitor stopped`);
   }
 
   private schedulePoll(): void {
     this.pollTimer = setTimeout(() => {
-      this.poll().catch((err) => {
-        logger.warn({ err }, `[${this.chainConfig.name}] Poll error`);
-      }).finally(() => {
-        if (this.running) this.schedulePoll();
-      });
+      this.poll()
+        .catch((err) => logger.warn({ err: String(err) }, `[${this.chainConfig.name}] Unhandled poll error`))
+        .finally(() => {
+          if (this.running) this.schedulePoll();
+        });
     }, POLL_INTERVAL_MS);
   }
 
   private async poll(): Promise<void> {
     if (!this.provider || !this.contract || !this.running) return;
 
-    const latestBlock = (await this.provider.getBlockNumber()) - 1; // -1 to avoid "beyond head" errors
-    if (latestBlock <= this.lastProcessedBlock) return;
+    let latest: number;
+    try {
+      latest = await this.provider.getBlockNumber();
+    } catch (err) {
+      logger.warn({ err: String(err) }, `[${this.chainConfig.name}] getBlockNumber failed`);
+      return;
+    }
+
+    // Use latest-2 to avoid "beyond head" issues on slower nodes
+    const safeLatest = latest - 2;
+    if (safeLatest <= this.lastProcessedBlock) return;
 
     const fromBlock = this.lastProcessedBlock + 1;
-    const toBlock = Math.min(latestBlock, fromBlock + 50); // max 50 blocks per poll
+    const toBlock = Math.min(safeLatest, fromBlock + MAX_BLOCKS_PER_POLL - 1);
 
-    // Query Transfer events from the token contract in this block range
+    logger.info(
+      { chain: this.chainConfig.name, fromBlock, toBlock },
+      `[${this.chainConfig.name}] Polling blocks`,
+    );
+
     let events: ethers.EventLog[];
     try {
       const raw = await this.contract.queryFilter(
@@ -108,12 +143,20 @@ export class EvmMonitor {
       );
       events = raw.filter((e): e is ethers.EventLog => e instanceof ethers.EventLog);
     } catch (err) {
-      logger.warn({ err, fromBlock, toBlock }, `[${this.chainConfig.name}] queryFilter error`);
-      this.lastProcessedBlock = toBlock;
+      // Do NOT advance lastProcessedBlock on error — retry same range next poll
+      logger.warn({ err: String(err), fromBlock, toBlock }, `[${this.chainConfig.name}] queryFilter error — will retry`);
       return;
     }
 
+    // Only advance after successful query
     this.lastProcessedBlock = toBlock;
+
+    if (events.length > 0) {
+      logger.info(
+        { chain: this.chainConfig.name, fromBlock, toBlock, transfers: events.length },
+        `[${this.chainConfig.name}] Found ${events.length} Transfer event(s)`,
+      );
+    }
 
     for (const event of events) {
       try {
@@ -122,7 +165,7 @@ export class EvmMonitor {
         const value = event.args[2] as bigint;
         await this.handleTransfer(from, to, value, event);
       } catch (err) {
-        logger.warn({ err }, `[${this.chainConfig.name}] Transfer handler error`);
+        logger.warn({ err: String(err) }, `[${this.chainConfig.name}] handleTransfer error`);
       }
     }
   }
@@ -133,22 +176,22 @@ export class EvmMonitor {
     value: bigint,
     event: ethers.EventLog,
   ): Promise<void> {
-    // Deduplicate by txHash
     const txHash = event.transactionHash;
+
+    // Deduplicate
     if (this.seenTxHashes.has(txHash)) return;
     this.seenTxHashes.add(txHash);
-    // Keep seen set from growing unbounded
     if (this.seenTxHashes.size > 2000) {
-      const oldest = [...this.seenTxHashes].slice(0, 500);
-      oldest.forEach((h) => this.seenTxHashes.delete(h));
+      const arr = [...this.seenTxHashes];
+      arr.slice(0, 500).forEach((h) => this.seenTxHashes.delete(h));
     }
 
-    // Only treat transfer FROM pair address as a buy
-    if (this.pairAddress) {
-      if (from.toLowerCase() !== this.pairAddress.toLowerCase()) return;
-    } else {
-      // Without pair: skip mints and burns
-      if (from === ethers.ZeroAddress || to === ethers.ZeroAddress) return;
+    // Skip mints and burns
+    if (from === ethers.ZeroAddress || to === ethers.ZeroAddress) return;
+
+    // If pair address is known, only count transfers FROM the liquidity pool (= buy)
+    if (this.pairAddress && from.toLowerCase() !== this.pairAddress.toLowerCase()) {
+      return;
     }
 
     const tokensReceived = Number(ethers.formatUnits(value, this.decimals));
@@ -156,37 +199,37 @@ export class EvmMonitor {
 
     const buyerAddress = to;
 
-    // Try to get native amount from tx.value (ETH swaps only)
+    logger.info(
+      { chain: this.chainConfig.name, txHash, from, to: buyerAddress, tokens: tokensReceived },
+      `[${this.chainConfig.name}] Transfer detected — fetching TX for native amount`,
+    );
+
+    // Try to get native ETH amount from tx.value
     let amountNative = 0;
     let amountUsd = 0;
     if (this.provider) {
       try {
         const tx = await this.provider.getTransaction(txHash);
-        if (tx) {
-          const valueSent = Number(ethers.formatEther(tx.value));
-          if (valueSent > 0) {
-            amountNative = valueSent;
-            const nativePrice = await getNativePrice(this.chainConfig.nativeCoinGeckoId);
-            amountUsd = amountNative * nativePrice;
-          }
-          // For WETH/ERC-20 input swaps, tx.value = 0.
-          // Leave amountNative=0, amountUsd=0 so botRegistry falls back to
-          // tokensReceived * tokenPriceUsd from DexScreener.
+        if (tx && tx.value > 0n) {
+          amountNative = Number(ethers.formatEther(tx.value));
+          const nativePrice = await getNativePrice(this.chainConfig.nativeCoinGeckoId);
+          amountUsd = amountNative * nativePrice;
+          logger.info(
+            { chain: this.chainConfig.name, txHash, amountNative, nativePrice, amountUsd },
+            `[${this.chainConfig.name}] ETH buy detected`,
+          );
+        } else {
+          // WETH/ERC-20 input swap → botRegistry falls back to DexScreener price × tokens
+          logger.info(
+            { chain: this.chainConfig.name, txHash, tokens: tokensReceived },
+            `[${this.chainConfig.name}] Token swap detected (no ETH value — will use DexScreener price)`,
+          );
         }
-      } catch {}
+      } catch (err) {
+        logger.warn({ err: String(err) }, `[${this.chainConfig.name}] getTransaction failed`);
+      }
     }
 
-    logger.debug(
-      { txHash, buyer: buyerAddress, tokens: tokensReceived, amountUsd, chain: this.chainConfig.name },
-      `[${this.chainConfig.name}] Buy detected`,
-    );
-
-    this.onBuy({
-      signature: txHash,
-      buyerAddress,
-      tokensReceived,
-      amountNative,
-      amountUsd,
-    });
+    this.onBuy({ signature: txHash, buyerAddress, tokensReceived, amountNative, amountUsd });
   }
 }

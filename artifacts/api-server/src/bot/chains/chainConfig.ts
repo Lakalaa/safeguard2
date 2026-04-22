@@ -7,9 +7,12 @@ export interface ChainConfig {
   explorerAddress: string; // URL template with {address}
   type: "solana" | "evm";
   rpcHttp: string;
-  rpcWss: string;
+  rpcHttpFallback?: string; // secondary RPC if primary fails
 }
 
+// Free public RPCs that support eth_getLogs without API keys.
+// Primary: LlamaRPC (DefiLlama) — no rate limit on free tier, supports all eth_ calls.
+// Fallback: drpc.org — another free public endpoint.
 export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
   solana: {
     id: "solana",
@@ -20,7 +23,7 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     explorerAddress: "https://solscan.io/account/{address}",
     type: "solana",
     rpcHttp: "https://api.mainnet-beta.solana.com",
-    rpcWss: "wss://api.mainnet-beta.solana.com",
+    rpcHttpFallback: "https://solana.drpc.org",
   },
   ethereum: {
     id: "ethereum",
@@ -30,8 +33,8 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     explorerTx: "https://etherscan.io/tx/{tx}",
     explorerAddress: "https://etherscan.io/address/{address}",
     type: "evm",
-    rpcHttp: "https://ethereum.publicnode.com",
-    rpcWss: "wss://ethereum.publicnode.com",
+    rpcHttp: "https://eth.llamarpc.com",
+    rpcHttpFallback: "https://eth.drpc.org",
   },
   bsc: {
     id: "bsc",
@@ -41,8 +44,8 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     explorerTx: "https://bscscan.com/tx/{tx}",
     explorerAddress: "https://bscscan.com/address/{address}",
     type: "evm",
-    rpcHttp: "https://bsc.publicnode.com",
-    rpcWss: "wss://bsc.publicnode.com",
+    rpcHttp: "https://bsc.llamarpc.com",
+    rpcHttpFallback: "https://bsc.drpc.org",
   },
   base: {
     id: "base",
@@ -52,8 +55,8 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     explorerTx: "https://basescan.org/tx/{tx}",
     explorerAddress: "https://basescan.org/address/{address}",
     type: "evm",
-    rpcHttp: "https://base.publicnode.com",
-    rpcWss: "wss://base.publicnode.com",
+    rpcHttp: "https://base.llamarpc.com",
+    rpcHttpFallback: "https://base.drpc.org",
   },
   arbitrum: {
     id: "arbitrum",
@@ -63,8 +66,8 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     explorerTx: "https://arbiscan.io/tx/{tx}",
     explorerAddress: "https://arbiscan.io/address/{address}",
     type: "evm",
-    rpcHttp: "https://arbitrum.publicnode.com",
-    rpcWss: "wss://arbitrum.publicnode.com",
+    rpcHttp: "https://arbitrum.llamarpc.com",
+    rpcHttpFallback: "https://arbitrum.drpc.org",
   },
   polygon: {
     id: "polygon",
@@ -74,8 +77,8 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     explorerTx: "https://polygonscan.com/tx/{tx}",
     explorerAddress: "https://polygonscan.com/address/{address}",
     type: "evm",
-    rpcHttp: "https://polygon.publicnode.com",
-    rpcWss: "wss://polygon.publicnode.com",
+    rpcHttp: "https://polygon.llamarpc.com",
+    rpcHttpFallback: "https://polygon.drpc.org",
   },
   avalanche: {
     id: "avalanche",
@@ -85,8 +88,8 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     explorerTx: "https://snowscan.xyz/tx/{tx}",
     explorerAddress: "https://snowscan.xyz/address/{address}",
     type: "evm",
-    rpcHttp: "https://avalanche.publicnode.com",
-    rpcWss: "wss://avalanche.publicnode.com",
+    rpcHttp: "https://avalanche.llamarpc.com",
+    rpcHttpFallback: "https://avax.drpc.org",
   },
   optimism: {
     id: "optimism",
@@ -96,8 +99,8 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     explorerTx: "https://optimistic.etherscan.io/tx/{tx}",
     explorerAddress: "https://optimistic.etherscan.io/address/{address}",
     type: "evm",
-    rpcHttp: "https://optimism.publicnode.com",
-    rpcWss: "wss://optimism.publicnode.com",
+    rpcHttp: "https://optimism.llamarpc.com",
+    rpcHttpFallback: "https://optimism.drpc.org",
   },
 };
 
@@ -106,8 +109,6 @@ export function getChainConfig(chainId: string): ChainConfig | null {
 }
 
 export function detectChainFromAddress(address: string): string {
-  // EVM addresses start with 0x and are 42 chars
-  if (/^0x[0-9a-fA-F]{40}$/.test(address)) return "ethereum"; // default EVM → ETH, DexScreener will clarify
-  // Solana addresses are base58, 32-44 chars
+  if (/^0x[0-9a-fA-F]{40}$/.test(address)) return "ethereum";
   return "solana";
 }
