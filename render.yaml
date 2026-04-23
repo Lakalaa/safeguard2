@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: safeguard-bot
+    runtime: node
+    plan: free
+    buildCommand: pnpm install && pnpm --filter @workspace/api-server run build
+    startCommand: node --enable-source-maps ./artifacts/api-server/dist/index.mjs
+    healthCheckPath: /api/bots
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
