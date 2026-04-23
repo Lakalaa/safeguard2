@@ -6,6 +6,7 @@ import { logger } from "../lib/logger";
 import { getChainConfig, detectChainFromAddress } from "./chains/chainConfig";
 import { SolanaMonitor, type BuyEvent } from "./chains/solanaMonitor";
 import { EvmMonitor } from "./chains/evmMonitor";
+import { getNativePrice } from "./chains/priceService";
 import type { BotConfig } from "@workspace/db";
 
 export interface DexScreenerPair {
@@ -292,6 +293,17 @@ class BotRegistry {
           ? event.tokensReceived * tokenPriceUsd
           : 0;
 
+    // If the monitor couldn't determine how much native token was spent
+    // (e.g. WETH/ERC-20 swap on EVM, or USDC swap on Solana), back-calculate
+    // from amountUsd so the alert always shows "X.XX ETH" / "X.XX SOL".
+    let amountNative = event.amountNative;
+    if (amountNative <= 0 && amountUsd > 0) {
+      try {
+        const nativePrice = await getNativePrice(chainConfig.nativeCoinGeckoId);
+        if (nativePrice > 0) amountNative = amountUsd / nativePrice;
+      } catch { /* keep 0 */ }
+    }
+
     const minBuy = config.minBuyUsd ?? 1;
     if (amountUsd < minBuy) return;
 
@@ -303,7 +315,7 @@ class BotRegistry {
       chain: chainId,
       buyerAddress: event.buyerAddress,
       amountUsd,
-      amountNative: event.amountNative,
+      amountNative,
       nativeCurrency: chainConfig.nativeCurrency,
       tokensReceived: event.tokensReceived,
       marketCap: marketCap ?? null,
@@ -320,7 +332,7 @@ class BotRegistry {
       minBuyUsd: config.minBuyUsd ?? 1,
       alertEmoji: config.alertEmoji || "🟢",
       amountUsd,
-      amountNative: event.amountNative,
+      amountNative,
       nativeCurrency: chainConfig.nativeCurrency,
       tokensReceived: event.tokensReceived,
       buyerAddress: event.buyerAddress,
