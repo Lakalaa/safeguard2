@@ -491,10 +491,13 @@ class BotRegistry {
     logger.info({ configId }, "Bot stopped");
   }
 
-  /** Swap the repeat timer live — called when admin changes the interval via /setup */
+  /** Swap the repeat timer live — works even when monitoring is off */
   restartRepeatTimer(configId: number, intervalSecs: number | null): void {
-    const inst = this.instances.get(configId);
-    if (!inst || !inst.running) return;
+    let inst = this.instances.get(configId);
+    if (!inst) {
+      inst = { chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null };
+      this.instances.set(configId, inst);
+    }
 
     if (inst.repeatTimer) {
       clearInterval(inst.repeatTimer);
@@ -513,13 +516,16 @@ class BotRegistry {
     this.instances.set(configId, inst);
   }
 
-  /** Update raid timer live — called when admin changes url/interval */
+  /** Update raid timer live — works even when monitoring is off */
   restartRaidTimer(configId: number, intervalSecs: number | null): void {
-    const inst = this.instances.get(configId);
-    if (!inst) return;
+    let inst = this.instances.get(configId);
+    if (!inst) {
+      inst = { chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null };
+      this.instances.set(configId, inst);
+    }
     if (inst.raidTimer) { clearInterval(inst.raidTimer); inst.raidTimer = null; }
     const secs = intervalSecs ?? 0;
-    if (secs > 0 && inst.running) {
+    if (secs > 0) {
       inst.raidTimer = setInterval(() => {
         this.sendRaidAlert(configId).catch((err) =>
           logger.error({ err, configId }, "Raid alert error"),
@@ -530,13 +536,17 @@ class BotRegistry {
     this.instances.set(configId, inst);
   }
 
-  /** Update vote timer live */
+  /** Update vote timer live — works even when monitoring is off */
   restartVoteTimer(configId: number, intervalSecs: number | null): void {
-    const inst = this.instances.get(configId);
-    if (!inst) return;
+    let inst = this.instances.get(configId);
+    if (!inst) {
+      // Create a minimal stub so timers can run without monitoring
+      inst = { chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null };
+      this.instances.set(configId, inst);
+    }
     if (inst.voteTimer) { clearInterval(inst.voteTimer); inst.voteTimer = null; }
     const secs = intervalSecs ?? 0;
-    if (secs > 0 && inst.running) {
+    if (secs > 0) {
       inst.voteTimer = setInterval(() => {
         this.sendVoteAlert(configId).catch((err) =>
           logger.error({ err, configId }, "Vote alert error"),
@@ -627,13 +637,24 @@ class BotRegistry {
   }
 
   async autoStartAll(): Promise<void> {
-    const configs = await db
-      .select()
-      .from(botConfigTable)
-      .where(and(eq(botConfigTable.isActive, true)));
+    const configs = await db.select().from(botConfigTable);
     for (const config of configs) {
-      logger.info({ configId: config.id, name: config.name }, "Auto-starting bot");
-      await this.start(config.id);
+      // Start full monitoring for active bots
+      if (config.isActive) {
+        logger.info({ configId: config.id, name: config.name }, "Auto-starting bot");
+        await this.start(config.id);
+      } else {
+        // Even inactive bots: start any configured timers (vote/raid/repeat) independently
+        const hasTimer = (config.voteInterval && config.voteInterval > 0)
+          || (config.raidInterval && config.raidInterval > 0)
+          || (config.repeatInterval && config.repeatInterval > 0);
+        if (hasTimer) {
+          logger.info({ configId: config.id }, "Starting timers for inactive bot");
+          if (config.voteInterval && config.voteInterval > 0) this.restartVoteTimer(config.id, config.voteInterval);
+          if (config.raidInterval && config.raidInterval > 0) this.restartRaidTimer(config.id, config.raidInterval);
+          if (config.repeatInterval && config.repeatInterval > 0) this.restartRepeatTimer(config.id, config.repeatInterval);
+        }
+      }
     }
   }
 

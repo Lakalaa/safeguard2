@@ -1109,13 +1109,13 @@ export function startCommandBot(): void {
     }
 
     if (state.step === "await_vote_count") {
-      pendingState.delete(chatId);
-      const nums = text.trim().split(/\s+/).map(Number);
+      const rawText = (msg.text ?? "").trim();
+      const nums = rawText.split(/\s+/).map(Number);
       if (nums.length < 2 || nums.some(isNaN) || nums.some((n) => n < 0)) {
         await bot.sendMessage(chatId, `❌ Please send two positive numbers: Starting Count then Votes per Post.\nExample: <code>5000 25</code>`, { parse_mode: "HTML" });
-        pendingState.set(chatId, state);
         return;
       }
+      pendingState.delete(chatId);
       const [startCount = 1000, increment = 10] = nums;
       await db.update(botConfigTable).set({ voteCount: startCount, voteIncrement: increment, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
       const updated = await getOrCreate(chatId);
@@ -1125,13 +1125,13 @@ export function startCommandBot(): void {
     }
 
     if (state.step === "await_vote_position") {
-      pendingState.delete(chatId);
-      const nums = text.trim().split(/\s+/).map(Number);
+      const rawText = (msg.text ?? "").trim();
+      const nums = rawText.split(/\s+/).map(Number);
       if (nums.length < 2 || nums.some(isNaN) || nums.some((n) => n < 0)) {
         await bot.sendMessage(chatId, `❌ Please send two numbers: Position then Votes Needed.\nExample: <code>3 50</code>`, { parse_mode: "HTML" });
-        pendingState.set(chatId, state);
         return;
       }
+      pendingState.delete(chatId);
       const [position = 1, needed = 50] = nums;
       await db.update(botConfigTable).set({ votePosition: position, voteNeeded: needed, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
       const updated = await getOrCreate(chatId);
@@ -1141,13 +1141,12 @@ export function startCommandBot(): void {
     }
 
     if (state.step === "await_vote_image") {
-      pendingState.delete(chatId);
       const photo = msg.photo;
       if (!photo || photo.length === 0) {
-        await bot.sendMessage(chatId, `❌ Please send a photo (image file). Try again or tap ⬅️ Back in the Vote menu.`, { parse_mode: "HTML" });
-        pendingState.set(chatId, state);
+        await bot.sendMessage(chatId, `❌ Please send a photo (image file). Try again.`, { parse_mode: "HTML" });
         return;
       }
+      pendingState.delete(chatId);
       const fileId = photo[photo.length - 1]!.file_id;
       await db.update(botConfigTable).set({ voteImageFileId: fileId, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
       const updated = await getOrCreate(chatId);
@@ -1157,15 +1156,16 @@ export function startCommandBot(): void {
     }
 
     if (state.step === "await_vote_buttons") {
-      pendingState.delete(chatId);
-      if (text.trim().toLowerCase() === "clear") {
+      const rawText = (msg.text ?? "").trim();
+      if (rawText.toLowerCase() === "clear") {
+        pendingState.delete(chatId);
         await db.update(botConfigTable).set({ voteButtons: null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
         const updated = await getOrCreate(chatId);
         await bot.sendMessage(chatId, `✅ Buttons cleared.`, { parse_mode: "HTML" });
         await bot.sendMessage(chatId, "Back to Vote settings:", { parse_mode: "HTML", reply_markup: voteMenuKeyboard(updated) });
         return;
       }
-      const lines = text.trim().split("\n").filter(Boolean).slice(0, 4);
+      const lines = rawText.split("\n").filter(Boolean).slice(0, 4);
       const buttons: { text: string; url: string }[] = [];
       for (const line of lines) {
         const [btnText, btnUrl] = line.split("|").map((s) => s.trim());
@@ -1174,11 +1174,11 @@ export function startCommandBot(): void {
             `❌ Invalid line: <code>${line}</code>\nFormat must be: <code>Button Text | https://url.com</code>`,
             { parse_mode: "HTML" },
           );
-          pendingState.set(chatId, state);
           return;
         }
         buttons.push({ text: btnText, url: btnUrl });
       }
+      pendingState.delete(chatId);
       await db.update(botConfigTable).set({ voteButtons: JSON.stringify(buttons), updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
       const updated = await getOrCreate(chatId);
       await bot.sendMessage(chatId, `✅ ${buttons.length} button(s) saved.`, { parse_mode: "HTML" });
@@ -1187,9 +1187,8 @@ export function startCommandBot(): void {
     }
 
     if (state.step === "await_raid_url") {
-      pendingState.delete(chatId);
-      const tweetUrl = text.trim();
-      const tweetId = tweetUrl.match(/\/status\/(\d+)/)?.[1];
+      const rawText = (msg.text ?? "").trim();
+      const tweetId = rawText.match(/\/status\/(\d+)/)?.[1];
       if (!tweetId) {
         await bot.sendMessage(chatId,
           `❌ Invalid tweet URL. It must contain <code>/status/</code> followed by the tweet ID.\nExample: <code>https://x.com/user/status/1234567890</code>`,
@@ -1197,8 +1196,9 @@ export function startCommandBot(): void {
         );
         return;
       }
-      await db.update(botConfigTable).set({ raidTweetUrl: tweetUrl, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
-      pendingState.set(chatId, { step: "await_raid_targets", tweetUrl });
+      pendingState.delete(chatId);
+      await db.update(botConfigTable).set({ raidTweetUrl: rawText, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      pendingState.set(chatId, { step: "await_raid_targets", tweetUrl: rawText });
       await bot.sendMessage(chatId,
         `✅ Tweet URL saved!\n\n🎯 <b>Set Targets</b>\nSend three numbers: <b>Likes Retweets Replies</b>\nExample: <code>50 20 10</code>\n\nOr send <code>skip</code> to use defaults (10 likes, 5 retweets, 5 replies)`,
         { parse_mode: "HTML" },
@@ -1207,20 +1207,20 @@ export function startCommandBot(): void {
     }
 
     if (state.step === "await_raid_targets") {
-      pendingState.delete(chatId);
+      const rawText = (msg.text ?? "").trim();
       let likes = 10, retweets = 5, replies = 5;
-      if (text.trim().toLowerCase() !== "skip") {
-        const nums = text.trim().split(/\s+/).map(Number);
+      if (rawText.toLowerCase() !== "skip") {
+        const nums = rawText.split(/\s+/).map(Number);
         if (nums.length < 3 || nums.some(isNaN)) {
           await bot.sendMessage(chatId,
             `❌ Please send three numbers separated by spaces.\nExample: <code>50 20 10</code>\nOr send <code>skip</code> to use defaults.`,
             { parse_mode: "HTML" },
           );
-          pendingState.set(chatId, state); // restore state
           return;
         }
         [likes = 10, retweets = 5, replies = 5] = nums;
       }
+      pendingState.delete(chatId);
       await db.update(botConfigTable).set({
         raidTargetLikes: likes,
         raidTargetRetweets: retweets,
