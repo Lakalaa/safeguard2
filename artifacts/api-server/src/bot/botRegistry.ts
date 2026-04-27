@@ -66,8 +66,9 @@ interface AlertParams {
   tokenSymbol: string;
   chainName: string;
   tier: number;
-  minBuyUsd: number;   // used as the emoji scale unit: emojiCount = floor(amountUsd / minBuyUsd)
+  minBuyUsd: number;
   alertEmoji: string;
+  alertStyle: string; // "sosana" | "trending"
   amountUsd: number;
   amountNative: number;
   nativeCurrency: string;
@@ -82,21 +83,23 @@ interface AlertParams {
   screenerUrl?: string | null;
   buyUrl?: string | null;
   trendingUrl?: string | null;
+  telegramUrl?: string | null;
+  twitterUrl?: string | null;
+  websiteUrl?: string | null;
 }
 
-function buildAlertMessage(params: AlertParams): string {
+// ── Shared helpers ─────────────────────────────────────────────────────────────
+function emojiBar(params: AlertParams): string {
   const emoji = params.alertEmoji || "🟢";
-
-  // Emoji count scales linearly with buy size relative to the minimum buy:
-  //   count = floor(amountUsd / minBuyUsd), capped at 200 to avoid message limits.
-  // Example: minBuy=$10, buy=$106 → 10 emojis; buy=$1,524 → 152 emojis.
   const minBuy = params.minBuyUsd > 0 ? params.minBuyUsd : 1;
   const rawCount = Math.floor(params.amountUsd / minBuy);
-  const emojiCount = Math.max(1, Math.min(rawCount, 200));
-  const emojiBar = emoji.repeat(emojiCount);
+  return emoji.repeat(Math.max(1, Math.min(rawCount, 200)));
+}
 
+// ── Style 1: SOSANA (default) ──────────────────────────────────────────────────
+// Clean, text-link format matching the SOSANA/BOBO reference look.
+function buildSosanaMessage(params: AlertParams): string {
   const buyLabel = params.tier === 3 ? "🐋 Whale Buy!" : "Buy!";
-
   const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
   const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
 
@@ -112,7 +115,6 @@ function buildAlertMessage(params: AlertParams): string {
     ? `\n💰 Market Cap <b>$${Math.round(params.marketCap).toLocaleString("en-US")}</b>`
     : "";
 
-  // Bottom action links — all plain text hyperlinks, no inline buttons
   const linkParts: string[] = [];
   if (params.dextUrl) linkParts.push(`<a href="${params.dextUrl}">DexT</a>`);
   if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
@@ -122,7 +124,7 @@ function buildAlertMessage(params: AlertParams): string {
 
   return (
     `<b>${params.tokenName} ${buyLabel}</b>\n` +
-    `${emojiBar}\n\n` +
+    `${emojiBar(params)}\n\n` +
     `🔀 Spent <b>${formatNumber(params.amountUsd)}</b>${nativeStr}\n` +
     `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `👤 <a href="${buyerUrl}">Buyer</a> / <a href="${txUrl}">TX</a>` +
@@ -132,9 +134,67 @@ function buildAlertMessage(params: AlertParams): string {
   );
 }
 
-function buildAlertKeyboard(_params: AlertParams): TelegramBot.InlineKeyboardMarkup {
-  // No inline buttons — everything is embedded as hyperlinks in the message text
+function buildSosanaKeyboard(_params: AlertParams): TelegramBot.InlineKeyboardMarkup {
   return { inline_keyboard: [] };
+}
+
+// ── Style 2: Trending ──────────────────────────────────────────────────────────
+// Richer format with social links and inline buy/dex buttons.
+function buildTrendingMessage(params: AlertParams): string {
+  const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
+  const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
+  const shortBuyer = `${params.buyerAddress.slice(0, 6)}…${params.buyerAddress.slice(-4)}`;
+
+  const nativeStr = params.amountNative > 0
+    ? `${params.amountNative.toFixed(3)} ${params.nativeCurrency} (${formatNumber(params.amountUsd)})`
+    : formatNumber(params.amountUsd);
+
+  const positionLine = params.priceChangePct !== null
+    ? `\n🆕| Position: <b>${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(1)}%</b>`
+    : "";
+
+  const mcapLine = params.marketCap !== null
+    ? `\n📷| Market Cap: <b>$${Math.round(params.marketCap).toLocaleString("en-US")}</b>`
+    : "";
+
+  const socialParts: string[] = [];
+  if (params.telegramUrl) socialParts.push(`<a href="${params.telegramUrl}">Telegram</a>`);
+  if (params.twitterUrl) socialParts.push(`<a href="${params.twitterUrl}">X</a>`);
+  if (params.websiteUrl) socialParts.push(`<a href="${params.websiteUrl}">Website</a>`);
+  const socialLine = socialParts.length > 0 ? `\n👥| ${socialParts.join(" | ")}` : "";
+
+  return (
+    `<b>${params.tokenName} [${params.tokenSymbol}] Buy!</b>\n` +
+    `${emojiBar(params)}\n\n` +
+    `💲| <b>${nativeStr}</b>\n` +
+    `💼| Got: <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
+    `👤| <a href="${buyerUrl}">${shortBuyer}</a> | <a href="${txUrl}">Txn</a>` +
+    positionLine +
+    mcapLine +
+    socialLine
+  );
+}
+
+function buildTrendingKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
+  const buttons: TelegramBot.InlineKeyboardButton[] = [];
+  if (params.buyUrl) buttons.push({ text: "🛒 Buy", url: params.buyUrl });
+  if (params.dextUrl) buttons.push({ text: "📊 DexTools", url: params.dextUrl });
+  if (params.screenerUrl) buttons.push({ text: "📈 Screener", url: params.screenerUrl });
+  if (params.trendingUrl) buttons.push({ text: "🔥 Trending", url: params.trendingUrl });
+  return buttons.length > 0 ? { inline_keyboard: [buttons] } : { inline_keyboard: [] };
+}
+
+// ── Dispatcher ─────────────────────────────────────────────────────────────────
+function buildAlertMessage(params: AlertParams): string {
+  return params.alertStyle === "trending"
+    ? buildTrendingMessage(params)
+    : buildSosanaMessage(params);
+}
+
+function buildAlertKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
+  return params.alertStyle === "trending"
+    ? buildTrendingKeyboard(params)
+    : buildSosanaKeyboard(params);
 }
 
 interface BotInstance {
@@ -331,6 +391,7 @@ class BotRegistry {
       tier,
       minBuyUsd: config.minBuyUsd ?? 1,
       alertEmoji: config.alertEmoji || "🟢",
+      alertStyle: config.alertStyle ?? "sosana",
       amountUsd,
       amountNative,
       nativeCurrency: chainConfig.nativeCurrency,
@@ -345,6 +406,9 @@ class BotRegistry {
       screenerUrl: config.screenerUrl,
       buyUrl: config.buyUrl,
       trendingUrl: config.trendingUrl,
+      telegramUrl: config.telegramUrl,
+      twitterUrl: config.twitterUrl,
+      websiteUrl: config.websiteUrl,
     };
     const message = buildAlertMessage(alertParams);
     const keyboard = buildAlertKeyboard(alertParams);

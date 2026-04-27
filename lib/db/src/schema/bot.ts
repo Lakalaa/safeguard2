@@ -30,6 +30,10 @@ export const botConfigTable = pgTable("bot_config", {
   alertEmoji: text("alert_emoji").notNull().default("🟢"),
   alertMediaFileId: text("alert_media_file_id"),
   alertMediaType: text("alert_media_type"),
+  alertStyle: text("alert_style").notNull().default("sosana"), // "sosana" | "trending"
+  telegramUrl: text("telegram_url"),
+  twitterUrl: text("twitter_url"),
+  websiteUrl: text("website_url"),
   tier1Min: real("tier1_min").notNull().default(100),
   tier2Min: real("tier2_min").notNull().default(500),
   tier3Min: real("tier3_min").notNull().default(1000),

@@ -26,7 +26,10 @@ type PendingState =
   | { step: "await_emoji" }
   | { step: "await_emoji_count"; emoji: string }
   | { step: "await_media" }
-  | { step: "await_buy_link" };
+  | { step: "await_buy_link" }
+  | { step: "await_social_telegram" }
+  | { step: "await_social_twitter"; telegramUrl: string | null }
+  | { step: "await_social_website"; telegramUrl: string | null; twitterUrl: string | null };
 
 const pendingState = new Map<string, PendingState>();
 
@@ -75,6 +78,9 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
   const count = config.emojiPerTier ?? 5;
   const hasMedia = !!(config.alertMediaFileId || config.alertImageUrl);
   const min = config.minBuyUsd ?? 1;
+  const style = config.alertStyle ?? "sosana";
+  const styleLabel = style === "trending" ? "📊 Style: Trending ✅" : "🔄 Style: SOSANA ✅";
+  const hasSocial = !!(config.telegramUrl || config.twitterUrl || config.websiteUrl);
   return {
     inline_keyboard: [
       [
@@ -86,12 +92,34 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
         { text: `💵 Min: $${min}`, callback_data: "cfg:min" },
       ],
       [
+        { text: styleLabel, callback_data: "cfg:style" },
+        { text: hasSocial ? "👥 Social ✅" : "👥 Social Links", callback_data: "cfg:social" },
+      ],
+      [
         {
           text: running ? "⏹ Stop" : "▶️ Start Monitoring",
           callback_data: running ? "action:stop" : "action:start",
         },
         { text: "🔄 Refresh", callback_data: "action:status" },
       ],
+    ],
+  };
+}
+
+function styleKeyboard(current: string): TelegramBot.InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: current === "sosana" ? "✅ SOSANA (current)" : "🔄 SOSANA",
+          callback_data: "set:style:sosana",
+        },
+        {
+          text: current === "trending" ? "✅ Trending (current)" : "📊 Trending",
+          callback_data: "set:style:trending",
+        },
+      ],
+      [{ text: "⬅️ Back", callback_data: "action:settings" }],
     ],
   };
 }
@@ -471,6 +499,41 @@ export function startCommandBot(): void {
       );
       return;
     }
+
+    // Alert style picker
+    if (data === "cfg:style") {
+      const current = config.alertStyle ?? "sosana";
+      await bot.editMessageText(
+        `🎨 <b>Alert Style</b>\n\n` +
+        `<b>SOSANA</b> — Clean format with text links at the bottom. Simple and fast.\n\n` +
+        `<b>Trending</b> — Richer format with native-first amounts, social links (Telegram / X / Website) and inline Buy / DexTools / Screener buttons.`,
+        { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: styleKeyboard(current) },
+      ).catch(() => null);
+      return;
+    }
+
+    if (data === "set:style:sosana" || data === "set:style:trending") {
+      const newStyle = data === "set:style:trending" ? "trending" : "sosana";
+      await db.update(botConfigTable).set({ alertStyle: newStyle, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      const updated = await getOrCreate(chatId);
+      const { running } = botRegistry.getStatus(updated.id);
+      await sendSettings(bot, chatId, updated, running, msgId);
+      await bot.answerCallbackQuery(query.id, { text: `✅ Style set to ${newStyle === "trending" ? "Trending" : "SOSANA"}` });
+      return;
+    }
+
+    // Social links flow
+    if (data === "cfg:social") {
+      pendingState.set(chatId, { step: "await_social_telegram" });
+      const current = config.telegramUrl || config.twitterUrl || config.websiteUrl;
+      await bot.sendMessage(chatId,
+        `👥 <b>Social Links</b>\n\nThese appear in the <b>Trending</b> alert style.\n\n` +
+        (current ? `Current: ${[config.telegramUrl && "Telegram", config.twitterUrl && "X", config.websiteUrl && "Website"].filter(Boolean).join(", ")} ✅\n\n` : "") +
+        `<b>Step 1/3</b> — Reply with your <b>Telegram</b> group/channel URL, or <code>skip</code>.\n\nExample: <code>https://t.me/YourGroup</code>`,
+        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
+      );
+      return;
+    }
   });
 
   // ── Message handler: replies + plain text (force_reply flow) ─────────────
@@ -596,6 +659,69 @@ export function startCommandBot(): void {
         .set({ buyUrl: url, updatedAt: new Date() })
         .where(eq(botConfigTable.id, config.id));
       await bot.sendMessage(chatId, "✅ Buy link saved.");
+      const updated = await getOrCreate(chatId);
+      const { running } = botRegistry.getStatus(updated.id);
+      await sendSettings(bot, chatId, updated, running);
+      return;
+    }
+
+    // ── Social links ─────────────────────────────────────────────────────
+    if (state.step === "await_social_telegram") {
+      if (!msg.text) return;
+      const text = msg.text.trim();
+      const tgUrl = text.toLowerCase() === "skip" ? null : text.startsWith("http") ? text : null;
+      if (!tgUrl && text.toLowerCase() !== "skip") {
+        await bot.sendMessage(chatId, "❌ Please paste a valid URL starting with http, or type <code>skip</code>.", { parse_mode: "HTML" });
+        return;
+      }
+      pendingState.set(chatId, { step: "await_social_twitter", telegramUrl: tgUrl });
+      await bot.sendMessage(chatId,
+        `${tgUrl ? "✅ Telegram saved!" : "⏭ Skipped."}\n\n<b>Step 2/3</b> — Reply with your <b>X / Twitter</b> URL, or <code>skip</code>.\n\nExample: <code>https://x.com/YourProject</code>`,
+        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
+      );
+      return;
+    }
+
+    if (state.step === "await_social_twitter") {
+      if (!msg.text) return;
+      const text = msg.text.trim();
+      const xUrl = text.toLowerCase() === "skip" ? null : text.startsWith("http") ? text : null;
+      if (!xUrl && text.toLowerCase() !== "skip") {
+        await bot.sendMessage(chatId, "❌ Please paste a valid URL starting with http, or type <code>skip</code>.", { parse_mode: "HTML" });
+        return;
+      }
+      pendingState.set(chatId, { step: "await_social_website", telegramUrl: state.telegramUrl, twitterUrl: xUrl });
+      await bot.sendMessage(chatId,
+        `${xUrl ? "✅ X/Twitter saved!" : "⏭ Skipped."}\n\n<b>Step 3/3</b> — Reply with your <b>Website</b> URL, or <code>skip</code>.\n\nExample: <code>https://yourproject.com</code>`,
+        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
+      );
+      return;
+    }
+
+    if (state.step === "await_social_website") {
+      if (!msg.text) return;
+      const text = msg.text.trim();
+      const webUrl = text.toLowerCase() === "skip" ? null : text.startsWith("http") ? text : null;
+      if (!webUrl && text.toLowerCase() !== "skip") {
+        await bot.sendMessage(chatId, "❌ Please paste a valid URL starting with http, or type <code>skip</code>.", { parse_mode: "HTML" });
+        return;
+      }
+      pendingState.delete(chatId);
+      await db.update(botConfigTable)
+        .set({
+          telegramUrl: state.telegramUrl,
+          twitterUrl: state.twitterUrl,
+          websiteUrl: webUrl,
+          updatedAt: new Date(),
+        })
+        .where(eq(botConfigTable.id, config.id));
+      const saved = [state.telegramUrl && "Telegram", state.twitterUrl && "X", webUrl && "Website"].filter(Boolean);
+      await bot.sendMessage(chatId,
+        saved.length > 0
+          ? `✅ Social links saved: ${saved.join(", ")}\n\nThese will appear in <b>Trending</b> style alerts.`
+          : `✅ Social links cleared.`,
+        { parse_mode: "HTML" },
+      );
       const updated = await getOrCreate(chatId);
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running);
