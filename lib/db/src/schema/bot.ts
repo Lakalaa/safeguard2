@@ -37,6 +37,13 @@ export const botConfigTable = pgTable("bot_config", {
   raidTargetRetweets: integer("raid_target_retweets").default(5),
   raidTargetReplies: integer("raid_target_replies").default(5),
   raidInterval: integer("raid_interval"), // seconds between raid updates; null = off
+  voteInterval: integer("vote_interval"), // seconds between vote posts; null = off
+  voteCount: integer("vote_count").default(1000), // current simulated vote count
+  voteIncrement: integer("vote_increment").default(10), // votes added per post
+  votePosition: integer("vote_position").default(1), // leaderboard position shown
+  voteNeeded: integer("vote_needed").default(50), // votes needed to enter leaderboard
+  voteImageFileId: text("vote_image_file_id"), // Telegram file_id for banner image
+  voteButtons: text("vote_buttons"), // JSON: [{text,url}]
   telegramUrl: text("telegram_url"),
   twitterUrl: text("twitter_url"),
   websiteUrl: text("website_url"),

@@ -31,7 +31,11 @@ type PendingState =
   | { step: "await_social_twitter"; telegramUrl: string | null }
   | { step: "await_social_website"; telegramUrl: string | null; twitterUrl: string | null }
   | { step: "await_raid_url" }
-  | { step: "await_raid_targets"; tweetUrl: string };
+  | { step: "await_raid_targets"; tweetUrl: string }
+  | { step: "await_vote_count" }
+  | { step: "await_vote_position" }
+  | { step: "await_vote_image" }
+  | { step: "await_vote_buttons" };
 
 const pendingState = new Map<string, PendingState>();
 
@@ -102,6 +106,9 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
         { text: config.raidTweetUrl ? "🎯 Raid ✅" : "🎯 Raid Setup", callback_data: "cfg:raid" },
       ],
       [
+        { text: config.voteInterval ? "🗳 Vote Alert ✅" : "🗳 Vote Alert", callback_data: "cfg:vote" },
+      ],
+      [
         {
           text: running ? "⏹ Stop" : "▶️ Start Monitoring",
           callback_data: running ? "action:stop" : "action:start",
@@ -170,6 +177,42 @@ function raidIntervalKeyboard(tweetUrl: string, current: number | null | undefin
         { text: "🎯 Set Targets", callback_data: "cfg:raid:targets" },
       ],
       [{ text: "🗑 Clear Raid", callback_data: "cfg:raid:clear" }],
+      [{ text: "⬅️ Back", callback_data: "action:settings" }],
+    ],
+  };
+}
+
+function voteMenuKeyboard(config: BotConfig): TelegramBot.InlineKeyboardMarkup {
+  const presets = [
+    { label: "Off", secs: 0 },
+    { label: "30s", secs: 30 },
+    { label: "1min", secs: 60 },
+    { label: "5min", secs: 300 },
+    { label: "10min", secs: 600 },
+    { label: "30min", secs: 1800 },
+    { label: "1hr", secs: 3600 },
+  ];
+  const cur = config.voteInterval ?? 0;
+  const row = presets.map((p) => ({
+    text: p.secs === cur ? `✅ ${p.label}` : p.label,
+    callback_data: `set:vote:interval:${p.secs}`,
+  }));
+  return {
+    inline_keyboard: [
+      row.slice(0, 4),
+      row.slice(4),
+      [
+        { text: "🔢 Votes & Increment", callback_data: "cfg:vote:count" },
+        { text: "📊 Leaderboard", callback_data: "cfg:vote:position" },
+      ],
+      [
+        { text: "🖼 Banner Image", callback_data: "cfg:vote:image" },
+        { text: "🔗 Buttons", callback_data: "cfg:vote:buttons" },
+      ],
+      [
+        { text: config.voteImageFileId ? "🗑 Clear Image" : "── No Image ──", callback_data: "cfg:vote:clearimage" },
+        { text: "🗑 Reset Votes to 0", callback_data: "cfg:vote:reset" },
+      ],
       [{ text: "⬅️ Back", callback_data: "action:settings" }],
     ],
   };
@@ -767,6 +810,98 @@ export function startCommandBot(): void {
       return;
     }
 
+    // ── Vote alert ───────────────────────────────────────────────────────────────
+    if (data === "cfg:vote") {
+      const cur = config.voteInterval ?? 0;
+      const pos = config.votePosition ?? 1;
+      const needed = config.voteNeeded ?? 50;
+      const count = config.voteCount ?? 1000;
+      const incr = config.voteIncrement ?? 10;
+      const btnCount = (() => {
+        try { return config.voteButtons ? (JSON.parse(config.voteButtons) as unknown[]).length : 0; } catch { return 0; }
+      })();
+      await bot.editMessageText(
+        `🗳 <b>Vote Alert</b>\n\n` +
+        `Current Votes: <b>${count.toLocaleString()}</b> (+${incr} per post)\n` +
+        `Position: <b>#${pos}</b> | Needed: <b>${needed}</b>\n` +
+        `Image: ${config.voteImageFileId ? "✅" : "❌"}  Buttons: ${btnCount}\n` +
+        `Interval: <b>${formatInterval(cur)}</b>\n\n` +
+        `Pick an interval (or Off to pause), then configure the rest below:`,
+        { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: voteMenuKeyboard(config) },
+      ).catch(() => null);
+      return;
+    }
+
+    if (data.startsWith("set:vote:interval:")) {
+      const secs = parseInt(data.split(":")[3] ?? "0");
+      const interval = secs > 0 ? secs : null;
+      await db.update(botConfigTable).set({ voteInterval: interval, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      botRegistry.restartVoteTimer(config.id, interval);
+      const updated = await getOrCreate(chatId);
+      const { running } = botRegistry.getStatus(updated.id);
+      await sendSettings(bot, chatId, updated, running, msgId);
+      await bot.answerCallbackQuery(query.id, { text: `🗳 Vote: ${secs === 0 ? "Off" : formatInterval(secs)}` });
+      return;
+    }
+
+    if (data === "cfg:vote:count") {
+      pendingState.set(chatId, { step: "await_vote_count" });
+      await bot.sendMessage(chatId,
+        `🔢 <b>Votes & Increment</b>\n\nSend two numbers: <b>Starting Count</b> and <b>Votes per Post</b>\nExample: <code>5000 25</code>\n\nThis sets where the vote counter begins and how much it grows each post.`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
+    if (data === "cfg:vote:position") {
+      pendingState.set(chatId, { step: "await_vote_position" });
+      await bot.sendMessage(chatId,
+        `📊 <b>Leaderboard Position</b>\n\nSend two numbers: <b>Position</b> and <b>Votes Needed for Leaderboard</b>\nExample: <code>3 50</code>\n\nThis shows "Position: #3" and "Votes needed to enter Leaderboard: 50".`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
+    if (data === "cfg:vote:image") {
+      pendingState.set(chatId, { step: "await_vote_image" });
+      await bot.sendMessage(chatId,
+        `🖼 <b>Banner Image</b>\n\nSend a photo and the bot will use it as the banner above each vote alert.\n\nTo remove the current image, tap the "Clear Image" button in the Vote menu.`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
+    if (data === "cfg:vote:clearimage") {
+      await db.update(botConfigTable).set({ voteImageFileId: null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      const updated = await getOrCreate(chatId);
+      await bot.editMessageText(
+        `🗳 <b>Vote Alert</b>\n\nImage cleared. Configure below:`,
+        { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: voteMenuKeyboard(updated) },
+      ).catch(() => null);
+      await bot.answerCallbackQuery(query.id, { text: "🗑 Image cleared" });
+      return;
+    }
+
+    if (data === "cfg:vote:reset") {
+      await db.update(botConfigTable).set({ voteCount: 0, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      const updated = await getOrCreate(chatId);
+      await bot.editMessageText(
+        `🗳 <b>Vote Alert</b>\n\nVote count reset to 0.`,
+        { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: voteMenuKeyboard(updated) },
+      ).catch(() => null);
+      await bot.answerCallbackQuery(query.id, { text: "🗑 Votes reset to 0" });
+      return;
+    }
+
+    if (data === "cfg:vote:buttons") {
+      pendingState.set(chatId, { step: "await_vote_buttons" });
+      await bot.sendMessage(chatId,
+        `🔗 <b>Custom Buttons</b>\n\nSend one button per line in this format:\n<code>Button Text | https://link.com</code>\n\nExample:\n<code>🗳 Vote for TOKEN | https://coinvote.cc/token/TOKEN\n🎰 Create Raffle | https://t.me/rafflebot\n⚡ Boost Votes | https://example.com\n🔥 Buy Trending | https://dexscreener.com</code>\n\nUp to 4 buttons, shown 2 per row. Send <code>clear</code> to remove all buttons.`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
     // Social links flow
     if (data === "cfg:social") {
       pendingState.set(chatId, { step: "await_social_telegram" });
@@ -970,6 +1105,84 @@ export function startCommandBot(): void {
       const updated = await getOrCreate(chatId);
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running);
+      return;
+    }
+
+    if (state.step === "await_vote_count") {
+      pendingState.delete(chatId);
+      const nums = text.trim().split(/\s+/).map(Number);
+      if (nums.length < 2 || nums.some(isNaN) || nums.some((n) => n < 0)) {
+        await bot.sendMessage(chatId, `❌ Please send two positive numbers: Starting Count then Votes per Post.\nExample: <code>5000 25</code>`, { parse_mode: "HTML" });
+        pendingState.set(chatId, state);
+        return;
+      }
+      const [startCount = 1000, increment = 10] = nums;
+      await db.update(botConfigTable).set({ voteCount: startCount, voteIncrement: increment, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      const updated = await getOrCreate(chatId);
+      await bot.sendMessage(chatId, `✅ Votes set: starting at <b>${startCount.toLocaleString()}</b>, +<b>${increment}</b> per post.`, { parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "Back to Vote settings:", { parse_mode: "HTML", reply_markup: voteMenuKeyboard(updated) });
+      return;
+    }
+
+    if (state.step === "await_vote_position") {
+      pendingState.delete(chatId);
+      const nums = text.trim().split(/\s+/).map(Number);
+      if (nums.length < 2 || nums.some(isNaN) || nums.some((n) => n < 0)) {
+        await bot.sendMessage(chatId, `❌ Please send two numbers: Position then Votes Needed.\nExample: <code>3 50</code>`, { parse_mode: "HTML" });
+        pendingState.set(chatId, state);
+        return;
+      }
+      const [position = 1, needed = 50] = nums;
+      await db.update(botConfigTable).set({ votePosition: position, voteNeeded: needed, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      const updated = await getOrCreate(chatId);
+      await bot.sendMessage(chatId, `✅ Leaderboard set: Position <b>#${position}</b>, votes needed: <b>${needed}</b>.`, { parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "Back to Vote settings:", { parse_mode: "HTML", reply_markup: voteMenuKeyboard(updated) });
+      return;
+    }
+
+    if (state.step === "await_vote_image") {
+      pendingState.delete(chatId);
+      const photo = msg.photo;
+      if (!photo || photo.length === 0) {
+        await bot.sendMessage(chatId, `❌ Please send a photo (image file). Try again or tap ⬅️ Back in the Vote menu.`, { parse_mode: "HTML" });
+        pendingState.set(chatId, state);
+        return;
+      }
+      const fileId = photo[photo.length - 1]!.file_id;
+      await db.update(botConfigTable).set({ voteImageFileId: fileId, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      const updated = await getOrCreate(chatId);
+      await bot.sendMessage(chatId, `✅ Banner image saved! It will appear above each vote alert.`, { parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "Back to Vote settings:", { parse_mode: "HTML", reply_markup: voteMenuKeyboard(updated) });
+      return;
+    }
+
+    if (state.step === "await_vote_buttons") {
+      pendingState.delete(chatId);
+      if (text.trim().toLowerCase() === "clear") {
+        await db.update(botConfigTable).set({ voteButtons: null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+        const updated = await getOrCreate(chatId);
+        await bot.sendMessage(chatId, `✅ Buttons cleared.`, { parse_mode: "HTML" });
+        await bot.sendMessage(chatId, "Back to Vote settings:", { parse_mode: "HTML", reply_markup: voteMenuKeyboard(updated) });
+        return;
+      }
+      const lines = text.trim().split("\n").filter(Boolean).slice(0, 4);
+      const buttons: { text: string; url: string }[] = [];
+      for (const line of lines) {
+        const [btnText, btnUrl] = line.split("|").map((s) => s.trim());
+        if (!btnText || !btnUrl || !btnUrl.startsWith("http")) {
+          await bot.sendMessage(chatId,
+            `❌ Invalid line: <code>${line}</code>\nFormat must be: <code>Button Text | https://url.com</code>`,
+            { parse_mode: "HTML" },
+          );
+          pendingState.set(chatId, state);
+          return;
+        }
+        buttons.push({ text: btnText, url: btnUrl });
+      }
+      await db.update(botConfigTable).set({ voteButtons: JSON.stringify(buttons), updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      const updated = await getOrCreate(chatId);
+      await bot.sendMessage(chatId, `✅ ${buttons.length} button(s) saved.`, { parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "Back to Vote settings:", { parse_mode: "HTML", reply_markup: voteMenuKeyboard(updated) });
       return;
     }
 

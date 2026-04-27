@@ -230,6 +230,7 @@ interface BotInstance {
   dexCache: { data: DexScreenerPair | null; fetchedAt: number };
   repeatTimer: ReturnType<typeof setInterval> | null;
   raidTimer: ReturnType<typeof setInterval> | null;
+  voteTimer: ReturnType<typeof setInterval> | null;
 }
 
 // ── Twitter raid tracker ────────────────────────────────────────────────────────
@@ -273,6 +274,36 @@ function buildRaidMessage(
   if (rep) lines.push(rep);
   lines.push(`\n${tweetUrl}`);
   return lines.join("\n");
+}
+
+// ── Simulated vote alert ────────────────────────────────────────────────────────
+function buildVoteMessage(config: BotConfig, currentCount: number): string {
+  const name = config.tokenName ?? config.tokenSymbol ?? "Token";
+  const pos = config.votePosition ?? 1;
+  const needed = config.voteNeeded ?? 50;
+  return [
+    `🗳 <b>New Vote for ${name}!</b>`,
+    ``,
+    `• Current Votes: <b>${currentCount.toLocaleString()}</b>`,
+    `• Position: <b>#${pos}</b>`,
+    `🔋 <b>Votes needed to enter Leaderboard:</b> ${needed}`,
+  ].join("\n");
+}
+
+function buildVoteKeyboard(config: BotConfig): TelegramBot.InlineKeyboardMarkup | undefined {
+  const raw = config.voteButtons;
+  if (!raw) return undefined;
+  try {
+    const buttons = JSON.parse(raw) as { text: string; url: string }[];
+    if (!buttons.length) return undefined;
+    const rows: TelegramBot.InlineKeyboardButton[][] = [];
+    for (let i = 0; i < buttons.length; i += 2) {
+      rows.push(
+        buttons.slice(i, i + 2).map((b) => ({ text: b.text, url: b.url })),
+      );
+    }
+    return { inline_keyboard: rows };
+  } catch { return undefined; }
 }
 
 // ── Periodic repeat post (real live data, not a fake buy) ──────────────────────
@@ -359,6 +390,7 @@ class BotRegistry {
       dexCache: { data: null, fetchedAt: 0 },
       repeatTimer: null,
       raidTimer: null,
+      voteTimer: null,
     };
 
     try {
@@ -419,6 +451,16 @@ class BotRegistry {
         logger.info({ configId, intervalSecs: config.raidInterval }, "Raid timer started");
       }
 
+      // Start vote timer if configured
+      if (config.voteInterval && config.voteInterval > 0) {
+        inst.voteTimer = setInterval(() => {
+          this.sendVoteAlert(configId).catch((err) =>
+            logger.error({ err, configId }, "Vote alert error"),
+          );
+        }, config.voteInterval * 1000);
+        logger.info({ configId, intervalSecs: config.voteInterval }, "Vote timer started");
+      }
+
       logger.info({ configId, token: config.tokenAddress, chain: chainId }, "Bot started");
       return { running: true };
     } catch (err) {
@@ -435,6 +477,7 @@ class BotRegistry {
     if (!inst) return;
     if (inst.repeatTimer) { clearInterval(inst.repeatTimer); inst.repeatTimer = null; }
     if (inst.raidTimer) { clearInterval(inst.raidTimer); inst.raidTimer = null; }
+    if (inst.voteTimer) { clearInterval(inst.voteTimer); inst.voteTimer = null; }
     if (inst.monitor) {
       await inst.monitor.stop();
       inst.monitor = null;
@@ -485,6 +528,56 @@ class BotRegistry {
       logger.info({ configId, intervalSecs: secs }, "Raid timer updated");
     }
     this.instances.set(configId, inst);
+  }
+
+  /** Update vote timer live */
+  restartVoteTimer(configId: number, intervalSecs: number | null): void {
+    const inst = this.instances.get(configId);
+    if (!inst) return;
+    if (inst.voteTimer) { clearInterval(inst.voteTimer); inst.voteTimer = null; }
+    const secs = intervalSecs ?? 0;
+    if (secs > 0 && inst.running) {
+      inst.voteTimer = setInterval(() => {
+        this.sendVoteAlert(configId).catch((err) =>
+          logger.error({ err, configId }, "Vote alert error"),
+        );
+      }, secs * 1000);
+      logger.info({ configId, intervalSecs: secs }, "Vote timer updated");
+    }
+    this.instances.set(configId, inst);
+  }
+
+  private async sendVoteAlert(configId: number): Promise<void> {
+    const [config] = await db
+      .select().from(botConfigTable).where(eq(botConfigTable.id, configId)).limit(1);
+    const token = resolveToken(config);
+    if (!token || !config?.chatId) return;
+
+    // Increment vote count with slight randomness to look natural
+    const base = config.voteIncrement ?? 10;
+    const jitter = Math.floor(Math.random() * 5) - 2;
+    const newCount = (config.voteCount ?? 1000) + Math.max(1, base + jitter);
+    await db.update(botConfigTable)
+      .set({ voteCount: newCount, updatedAt: new Date() })
+      .where(eq(botConfigTable.id, configId));
+
+    const message = buildVoteMessage({ ...config, voteCount: newCount }, newCount);
+    const keyboard = buildVoteKeyboard(config);
+    const tgBot = new TelegramBot(token, { polling: false });
+
+    if (config.voteImageFileId) {
+      await tgBot.sendPhoto(config.chatId, config.voteImageFileId, {
+        caption: message,
+        parse_mode: "HTML",
+        ...(keyboard ? { reply_markup: keyboard } : {}),
+      });
+    } else {
+      await tgBot.sendMessage(config.chatId, message, {
+        parse_mode: "HTML",
+        ...(keyboard ? { reply_markup: keyboard } : {}),
+      });
+    }
+    logger.info({ configId, newCount }, "Vote alert sent");
   }
 
   private async sendRaidAlert(configId: number): Promise<void> {
