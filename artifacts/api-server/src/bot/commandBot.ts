@@ -319,7 +319,7 @@ export function startCommandBot(): void {
     { command: "start", description: "Start buy alert monitoring" },
     { command: "stop", description: "Stop monitoring" },
     { command: "status", description: "Check current status" },
-    { command: "ca", description: "Look up any token — /ca <address>" },
+    { command: "filter", description: "Look up any token — /filter <address>" },
   ]).catch(() => null);
 
   bot.on("polling_error", (err) => {
@@ -381,13 +381,13 @@ export function startCommandBot(): void {
     }
   });
 
-  // ── /ca — public contract address lookup (any user, any chain) ───────────
-  bot.onText(/^\/ca(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
+  // ── /filter — public contract address lookup (any user, any chain) ──────
+  bot.onText(/^\/filter(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
     const chatId = String(msg.chat.id);
     const address = match?.[1]?.trim();
     if (!address) {
       await bot.sendMessage(chatId,
-        `🔍 <b>Token Lookup</b>\n\nUsage: <code>/ca TOKEN_ADDRESS</code>\n\nWorks on all chains — Solana, Ethereum, BSC, Base, Polygon, Arbitrum, Avalanche, Optimism.`,
+        `🔍 <b>Token Lookup</b>\n\nUsage: <code>/filter TOKEN_ADDRESS</code>\n\nWorks on all chains — Solana, Ethereum, BSC, Base, Polygon, Arbitrum, Avalanche, Optimism.`,
         { parse_mode: "HTML" },
       );
       return;
