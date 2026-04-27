@@ -32,6 +32,7 @@ type PendingState =
   | { step: "await_social_website"; telegramUrl: string | null; twitterUrl: string | null }
   | { step: "await_raid_url" }
   | { step: "await_raid_targets"; tweetUrl: string }
+  | { step: "await_tier_thresholds" }
   | { step: "await_vote_count" }
   | { step: "await_vote_position" }
   | { step: "await_vote_image" }
@@ -236,12 +237,47 @@ function styleKeyboard(current: string): TelegramBot.InlineKeyboardMarkup {
   };
 }
 
+function filterKeyboard(config: BotConfig): TelegramBot.InlineKeyboardMarkup {
+  const min = config.minBuyUsd ?? 1;
+  const t1 = config.tier1Min ?? 100;
+  const t2 = config.tier2Min ?? 500;
+  const t3 = config.tier3Min ?? 1000;
+  return {
+    inline_keyboard: [
+      [{ text: `💵 Min Buy: $${min}`, callback_data: "cfg:min" }],
+      [{ text: `🏷 Set Tiers ($${t1} / $${t2} / $${t3})`, callback_data: "cfg:tiers" }],
+      [{ text: "⬅️ Back to Settings", callback_data: "action:settings" }],
+    ],
+  };
+}
+
+function filterText(config: BotConfig): string {
+  const min = config.minBuyUsd ?? 1;
+  const emoji = config.alertEmoji ?? "🟢";
+  const count = config.emojiPerTier ?? 4;
+  const t1 = config.tier1Min ?? 100;
+  const t2 = config.tier2Min ?? 500;
+  const t3 = config.tier3Min ?? 1000;
+  return [
+    `🔍 <b>Buy Alert Filters</b>`,
+    ``,
+    `Only buys of <b>$${min}+</b> will trigger an alert.`,
+    ``,
+    `<b>Tier Thresholds</b> (controls emoji count per buy size):`,
+    `${emoji.repeat(count)} Small — $${min} – $${t1}`,
+    `${emoji.repeat(count * 2)} Medium — $${t1} – $${t2}`,
+    `${emoji.repeat(count * 3)} 🐋 Whale — $${t2}+`,
+    ``,
+    `<i>Tap below to update:</i>`,
+  ].join("\n");
+}
+
 function minBuyKeyboard(): TelegramBot.InlineKeyboardMarkup {
   const amounts = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000];
   const rows: TelegramBot.InlineKeyboardButton[][] = [];
   for (let i = 0; i < amounts.length; i += 4)
     rows.push(amounts.slice(i, i + 4).map((n) => ({ text: `$${n}`, callback_data: `set:min:${n}` })));
-  rows.push([{ text: "⬅️ Back", callback_data: "action:settings" }]);
+  rows.push([{ text: "⬅️ Back to Filters", callback_data: "cfg:filter" }]);
   return { inline_keyboard: rows };
 }
 
@@ -320,6 +356,7 @@ export function startCommandBot(): void {
     { command: "stop", description: "Stop monitoring" },
     { command: "status", description: "Check current status" },
     { command: "ca", description: "Look up any token — /ca <address>" },
+    { command: "filter", description: "Set buy alert filters (min buy, tiers)" },
   ]).catch(() => null);
 
   bot.on("polling_error", (err) => {
@@ -513,6 +550,18 @@ export function startCommandBot(): void {
     await processTokenAddress(chatId, address, chain, config);
   });
 
+  // ── /filter — admin filter settings (min buy, tiers) ─────────────────────
+  bot.onText(/^\/filter(@\S+)?$/, async (msg) => {
+    if (!msg.from) return;
+    const chatId = String(msg.chat.id);
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    const config = await getOrCreate(chatId, msg.chat.title);
+    await bot.sendMessage(chatId, filterText(config), {
+      parse_mode: "HTML",
+      reply_markup: filterKeyboard(config),
+    });
+  });
+
   // ── /setup ────────────────────────────────────────────────────────────────
   bot.onText(/^\/setup(@\S+)?$/, async (msg) => {
     if (!msg.from) return;
@@ -637,10 +686,34 @@ export function startCommandBot(): void {
       return;
     }
 
+    // Filter menu
+    if (data === "cfg:filter") {
+      await bot.editMessageText(filterText(config), {
+        chat_id: chatId, message_id: msgId, parse_mode: "HTML",
+        reply_markup: filterKeyboard(config),
+      }).catch(() => null);
+      return;
+    }
+
+    // Tier thresholds
+    if (data === "cfg:tiers") {
+      pendingState.set(chatId, { step: "await_tier_thresholds" });
+      const t1 = config.tier1Min ?? 100;
+      const t2 = config.tier2Min ?? 500;
+      const t3 = config.tier3Min ?? 1000;
+      await bot.sendMessage(chatId,
+        `🏷 <b>Tier Thresholds</b>\n\nSend three numbers: <b>Tier1 Tier2 Tier3</b> (in USD)\n\n` +
+        `• Tier 1 = upper limit of Small buys\n• Tier 2 = upper limit of Medium buys\n• Tier 3 = Whale minimum\n\n` +
+        `Example: <code>500 1000 5000</code>\n\nCurrent: <b>$${t1} / $${t2} / $${t3}</b>`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
     // Min buy picker
     if (data === "cfg:min") {
       await bot.editMessageText(
-        `<b>💵 Minimum Buy Amount</b>\n\nChoose the minimum USD amount to trigger an alert:`,
+        `<b>💵 Minimum Buy Amount</b>\n\nOnly buys at or above this amount will post an alert. Choose:`,
         { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: minBuyKeyboard() },
       ).catch(() => null);
       return;
@@ -649,8 +722,11 @@ export function startCommandBot(): void {
       const n = parseFloat(data.split(":")[2] ?? "1");
       await db.update(botConfigTable).set({ minBuyUsd: n, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
       const updated = await getOrCreate(chatId);
-      const { running } = botRegistry.getStatus(updated.id);
-      await sendSettings(bot, chatId, updated, running, msgId);
+      await bot.editMessageText(filterText(updated), {
+        chat_id: chatId, message_id: msgId, parse_mode: "HTML",
+        reply_markup: filterKeyboard(updated),
+      }).catch(() => null);
+      await bot.answerCallbackQuery(query.id, { text: `✅ Min buy set to $${n}` });
       return;
     }
 
@@ -1105,6 +1181,36 @@ export function startCommandBot(): void {
       const updated = await getOrCreate(chatId);
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running);
+      return;
+    }
+
+    if (state.step === "await_tier_thresholds") {
+      const rawText = (msg.text ?? "").trim();
+      const nums = rawText.split(/\s+/).map(Number);
+      if (nums.length < 3 || nums.some(isNaN) || nums.some((n) => n <= 0)) {
+        await bot.sendMessage(chatId,
+          `❌ Please send three positive USD amounts.\nExample: <code>500 1000 5000</code>`,
+          { parse_mode: "HTML" },
+        );
+        return;
+      }
+      const [t1 = 100, t2 = 500, t3 = 1000] = nums;
+      if (t1 >= t2 || t2 >= t3) {
+        await bot.sendMessage(chatId,
+          `❌ Each tier must be larger than the previous.\nExample: <code>500 1000 5000</code>`,
+          { parse_mode: "HTML" },
+        );
+        return;
+      }
+      pendingState.delete(chatId);
+      await db.update(botConfigTable)
+        .set({ tier1Min: t1, tier2Min: t2, tier3Min: t3, updatedAt: new Date() })
+        .where(eq(botConfigTable.id, config.id));
+      const updated = await getOrCreate(chatId);
+      await bot.sendMessage(chatId,
+        `✅ Tiers updated:\n• Small: $${config.minBuyUsd ?? 1} – $${t1}\n• Medium: $${t1} – $${t2}\n• 🐋 Whale: $${t2}+`,
+        { parse_mode: "HTML", reply_markup: filterKeyboard(updated) },
+      );
       return;
     }
 
