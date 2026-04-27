@@ -319,80 +319,22 @@ export function startCommandBot(): void {
     { command: "start", description: "Start buy alert monitoring" },
     { command: "stop", description: "Stop monitoring" },
     { command: "status", description: "Check current status" },
-    { command: "ca", description: "View group token info, or /ca <address> to look up any token" },
-    { command: "filter", description: "Admin: /filter ca <address> — set the group token CA" },
+    { command: "ca", description: "Look up any token — /ca <address>" },
   ]).catch(() => null);
 
   bot.on("polling_error", (err) => {
     logger.error({ msg: String(err) }, "Telegram polling error");
   });
 
-  // ── /ca — show group token or look up any address ─────────────────────────
+  // ── /ca — public contract address lookup (any user, any chain) ───────────
   bot.onText(/^\/ca(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
     const chatId = String(msg.chat.id);
     const address = match?.[1]?.trim();
-
     if (!address) {
-      const config = await getOrCreate(chatId, msg.chat.title ?? undefined);
-      const saved = config.tokenAddress;
-      if (!saved) {
-        await bot.sendMessage(chatId,
-          `🔍 <b>Token Lookup</b>\n\nNo token has been set for this group yet.\n\nAdmins: use <code>/filter ca CONTRACT_ADDRESS</code> to set the token.\nAnyone: use <code>/ca CONTRACT_ADDRESS</code> to look up any token.`,
-          { parse_mode: "HTML" },
-        );
-        return;
-      }
-      const lookupMsg = await bot.sendMessage(chatId, `🔍 Fetching token info…`);
-      try {
-        const dexData = await getDexScreenerData(saved);
-        if (!dexData) {
-          await bot.editMessageText(
-            `📋 <b>Contract Address</b>\n\n<code>${saved}</code>\n\n<i>No live price data found.</i>`,
-            { chat_id: chatId, message_id: lookupMsg.message_id, parse_mode: "HTML" },
-          ).catch(() => null);
-          return;
-        }
-        const name = dexData.baseToken.name;
-        const symbol = dexData.baseToken.symbol;
-        const chain = dexData.chainId ?? "?";
-        const chainLabel = CHAIN_LABELS[chain] ?? chain;
-        const screenerUrl = dexData.url ?? `https://dexscreener.com/${chain}/${saved}`;
-        const price = dexData.priceUsd ? parseFloat(dexData.priceUsd) : null;
-        const priceStr = price === null ? "—"
-          : price < 0.000001 ? `$${price.toFixed(10)}`
-          : price < 0.001 ? `$${price.toFixed(8)}`
-          : price < 1 ? `$${price.toFixed(6)}`
-          : `$${price.toFixed(4)}`;
-        const change24h = dexData.priceChange?.h24 ?? null;
-        const changeEmoji = change24h === null ? "" : change24h >= 0 ? "📈 " : "📉 ";
-        const changeStr = change24h !== null ? `${changeEmoji}<b>${change24h >= 0 ? "+" : ""}${change24h.toFixed(1)}%</b>` : "—";
-        const mcap = dexData.marketCap ?? dexData.fdv ?? null;
-        const mcapStr = mcap !== null ? `$${Math.round(mcap).toLocaleString("en-US")}` : "—";
-        const liq = dexData.liquidity?.usd ?? null;
-        const liqStr = liq === null ? "—"
-          : liq >= 1_000_000 ? `$${(liq / 1_000_000).toFixed(2)}M`
-          : liq >= 1_000 ? `$${(liq / 1_000).toFixed(1)}K`
-          : `$${Math.round(liq)}`;
-        const text =
-          `🔍 <b>${name} [${symbol}]</b>\n` +
-          `⛓ ${chainLabel}\n\n` +
-          `💲 Price: <b>${priceStr}</b>\n` +
-          `24h: ${changeStr}\n` +
-          `💰 Market Cap: <b>${mcapStr}</b>\n` +
-          `💧 Liquidity: <b>${liqStr}</b>\n\n` +
-          `📋 Contract:\n<code>${saved}</code>\n\n` +
-          `<a href="${screenerUrl}">📈 View on DexScreener</a>`;
-        await bot.editMessageText(text, {
-          chat_id: chatId,
-          message_id: lookupMsg.message_id,
-          parse_mode: "HTML",
-          disable_web_page_preview: true,
-        }).catch(() => null);
-      } catch {
-        await bot.editMessageText(`❌ Error fetching token info.`, {
-          chat_id: chatId, message_id: lookupMsg.message_id,
-        }).catch(() => null);
-      }
+      await bot.sendMessage(chatId,
+        `🔍 <b>Token Lookup</b>\n\nUsage: <code>/ca TOKEN_ADDRESS</code>\n\nWorks on all chains — Solana, Ethereum, BSC, Base, Polygon, Arbitrum, Avalanche, Optimism.`,
+        { parse_mode: "HTML" },
+      );
       return;
     }
 
@@ -569,33 +511,6 @@ export function startCommandBot(): void {
     pendingState.delete(chatId);
     const config = await getOrCreate(chatId, msg.chat.title);
     await processTokenAddress(chatId, address, chain, config);
-  });
-
-  // ── /filter ca <address> — admin sets the group's token CA ───────────────
-  bot.onText(/^\/filter(?:@\S+)?(?:\s+(.+))?$/i, async (msg, match) => {
-    if (!msg.from) return;
-    const chatId = String(msg.chat.id);
-    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
-    const args = (match?.[1] ?? "").trim().split(/\s+/);
-    const subCmd = args[0]?.toLowerCase();
-    const address = args[1]?.trim();
-
-    if (subCmd === "ca") {
-      if (!address) {
-        await bot.sendMessage(chatId,
-          `⚙️ <b>Set Token CA</b>\n\nUsage:\n<code>/filter ca CONTRACT_ADDRESS</code>\n\nExample:\n<code>/filter ca 7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr</code>`,
-          { parse_mode: "HTML" },
-        );
-        return;
-      }
-      const config = await getOrCreate(chatId, msg.chat.title);
-      await processTokenAddress(chatId, address, config.chain ?? "solana", config);
-    } else {
-      await bot.sendMessage(chatId,
-        `⚙️ <b>Filter Commands (admin only)</b>\n\n<code>/filter ca &lt;address&gt;</code> — Set the group token contract address\n\nUsers can then type <code>/ca</code> to view the token info.`,
-        { parse_mode: "HTML" },
-      );
-    }
   });
 
   // ── /setup ────────────────────────────────────────────────────────────────
