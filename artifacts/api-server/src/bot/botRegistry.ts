@@ -236,20 +236,33 @@ interface BotInstance {
 // ── Twitter raid tracker ────────────────────────────────────────────────────────
 async function getTweetMetrics(tweetId: string): Promise<{ likes: number; retweets: number; replies: number } | null> {
   const token = process.env["TWITTER_BEARER_TOKEN"];
-  if (!token) return null;
+  if (!token) {
+    logger.warn("[Raid] TWITTER_BEARER_TOKEN not set — skipping raid alert");
+    return null;
+  }
   try {
     const res = await fetch(
       `https://api.twitter.com/2/tweets/${tweetId}?tweet.fields=public_metrics`,
-      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) },
+      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(25_000) },
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      logger.warn({ tweetId, status: res.status, body }, "[Raid] Twitter API error");
+      return null;
+    }
     const data = await res.json() as {
       data?: { public_metrics?: { like_count: number; retweet_count: number; reply_count: number } };
     };
     const m = data.data?.public_metrics;
-    if (!m) return null;
+    if (!m) {
+      logger.warn({ tweetId, data }, "[Raid] No public_metrics in Twitter response");
+      return null;
+    }
     return { likes: m.like_count, retweets: m.retweet_count, replies: m.reply_count };
-  } catch { return null; }
+  } catch (err) {
+    logger.warn({ tweetId, err: String(err) }, "[Raid] getTweetMetrics exception");
+    return null;
+  }
 }
 
 function buildRaidMessage(
