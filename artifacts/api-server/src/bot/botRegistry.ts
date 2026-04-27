@@ -409,6 +409,11 @@ function resolveToken(config: BotConfig | undefined): string | null {
   return config?.telegramToken || process.env["TELEGRAM_BOT_TOKEN"] || null;
 }
 
+/** For raid + vote: use the dedicated utility bot if set, otherwise fall back to main token */
+function resolveUtilityToken(config: BotConfig | undefined): string | null {
+  return config?.utilityBotToken || resolveToken(config);
+}
+
 class BotRegistry {
   private instances = new Map<number, BotInstance>();
 
@@ -624,7 +629,7 @@ class BotRegistry {
   private async sendVoteAlert(configId: number): Promise<void> {
     const [config] = await db
       .select().from(botConfigTable).where(eq(botConfigTable.id, configId)).limit(1);
-    const token = resolveToken(config);
+    const token = resolveUtilityToken(config);
     if (!token || !config?.chatId) return;
 
     // Increment vote count with slight randomness to look natural
@@ -657,7 +662,7 @@ class BotRegistry {
   private async sendRaidAlert(configId: number): Promise<void> {
     const [config] = await db
       .select().from(botConfigTable).where(eq(botConfigTable.id, configId)).limit(1);
-    const token = resolveToken(config);
+    const token = resolveUtilityToken(config);
     if (!token || !config?.chatId || !config.raidTweetUrl) return;
 
     const tweetId = config.raidTweetUrl.match(/\/status\/(\d+)/)?.[1];

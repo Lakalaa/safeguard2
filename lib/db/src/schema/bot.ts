@@ -44,6 +44,7 @@ export const botConfigTable = pgTable("bot_config", {
   voteNeeded: integer("vote_needed").default(50), // votes needed to enter leaderboard
   voteImageFileId: text("vote_image_file_id"), // Telegram file_id for banner image
   voteButtons: text("vote_buttons"), // JSON: [{text,url}]
+  utilityBotToken: text("utility_bot_token"), // separate bot token for raid+vote alerts
   telegramUrl: text("telegram_url"),
   twitterUrl: text("twitter_url"),
   websiteUrl: text("website_url"),

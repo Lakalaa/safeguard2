@@ -36,7 +36,8 @@ type PendingState =
   | { step: "await_vote_position" }
   | { step: "await_vote_image" }
   | { step: "await_vote_buttons" }
-  | { step: "await_filter_buttons"; commandName: string; messageText: string };
+  | { step: "await_filter_buttons"; commandName: string; messageText: string }
+  | { step: "await_utility_token" };
 
 const pendingState = new Map<string, PendingState>();
 
@@ -108,6 +109,7 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
       ],
       [
         { text: config.voteInterval ? "🗳 Vote Alert ✅" : "🗳 Vote Alert", callback_data: "cfg:vote" },
+        { text: config.utilityBotToken ? "🤖 Util Bot ✅" : "🤖 Util Bot", callback_data: "cfg:utility" },
       ],
       [
         {
@@ -1000,6 +1002,24 @@ export function startCommandBot(): void {
       return;
     }
 
+    // Utility bot token (for raid + vote alerts)
+    if (data === "cfg:utility") {
+      const current = config.utilityBotToken;
+      pendingState.set(chatId, { step: "await_utility_token" });
+      await bot.sendMessage(chatId,
+        `🤖 <b>Utility Bot Setup</b>\n\n` +
+        `This bot handles <b>Raid</b> and <b>Vote</b> alerts on a separate token, so buy alert floods never block them.\n\n` +
+        (current ? `Current: <code>${current.slice(0, 10)}…</code> ✅\n\n` : ``) +
+        `<b>Steps:</b>\n` +
+        `1. Open @BotFather → /newbot\n` +
+        `2. Name it anything (e.g. HORNY Alerts)\n` +
+        `3. Add it to your group as admin\n` +
+        `4. Paste the token here\n\n` +
+        `Or send <code>clear</code> to remove and use your main bot for everything.`,
+        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+      return;
+    }
+
     // Social links flow
     if (data === "cfg:social") {
       pendingState.set(chatId, { step: "await_social_telegram" });
@@ -1281,6 +1301,26 @@ export function startCommandBot(): void {
       const updated = await getOrCreate(chatId);
       await bot.sendMessage(chatId, `✅ ${buttons.length} button(s) saved.`, { parse_mode: "HTML" });
       await bot.sendMessage(chatId, "Back to Vote settings:", { parse_mode: "HTML", reply_markup: voteMenuKeyboard(updated) });
+      return;
+    }
+
+    // ── Utility bot token ──────────────────────────────────────────────────────
+    if (state.step === "await_utility_token") {
+      const raw = (msg.text ?? "").trim();
+      pendingState.delete(chatId);
+      if (raw.toLowerCase() === "clear") {
+        await db.update(botConfigTable).set({ utilityBotToken: null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+        await bot.sendMessage(chatId, `✅ Utility bot removed. Raid & vote alerts will use the main bot.`);
+      } else if (raw.match(/^\d+:[A-Za-z0-9_-]{35,}$/)) {
+        await db.update(botConfigTable).set({ utilityBotToken: raw, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+        await bot.sendMessage(chatId,
+          `✅ <b>Utility bot set!</b>\n\nRaid and vote alerts will now send through the separate bot.\n\nMake sure it's added to your group as an admin.`,
+          { parse_mode: "HTML" });
+      } else {
+        await bot.sendMessage(chatId,
+          `❌ That doesn't look like a valid bot token.\n\nFormat: <code>123456789:ABCdef...</code>\n\nGet it from @BotFather.`,
+          { parse_mode: "HTML" });
+      }
       return;
     }
 
