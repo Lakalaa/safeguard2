@@ -36,7 +36,6 @@ type PendingState =
   | { step: "await_vote_position" }
   | { step: "await_vote_image" }
   | { step: "await_vote_buttons" }
-  | { step: "await_filter_message"; commandName: string }
   | { step: "await_filter_buttons"; commandName: string; messageText: string };
 
 const pendingState = new Map<string, PendingState>();
@@ -385,7 +384,8 @@ export function startCommandBot(): void {
 
 
   // ── /filter — admin custom command builder ────────────────────────────────
-  bot.onText(/^\/filter(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
+  // Usage: /filter <name> <message or link>
+  bot.onText(/^\/filter(?:@\w+)?(?:\s+(.+))?$/is, async (msg, match) => {
     const chatId = String(msg.chat.id);
     const userId = msg.from?.id;
     if (!userId || !await isAdmin(bot, chatId, userId)) {
@@ -393,7 +393,7 @@ export function startCommandBot(): void {
       return;
     }
 
-    const arg = match?.[1]?.trim() ?? "";
+    const arg = (match?.[1] ?? "").trim();
     const config = await getOrCreate(chatId);
 
     // /filter list
@@ -402,15 +402,19 @@ export function startCommandBot(): void {
         .where(eq(customCommandsTable.botConfigId, config.id))
         .orderBy(customCommandsTable.commandName);
       if (cmds.length === 0) {
-        await bot.sendMessage(chatId, `📋 No custom commands set up yet.\n\nUse <code>/filter &lt;name&gt;</code> to create one.`, { parse_mode: "HTML" });
+        await bot.sendMessage(chatId,
+          `📋 No custom commands yet.\n\nCreate one:\n<code>/filter website https://yoursite.com</code>`,
+          { parse_mode: "HTML" });
         return;
       }
       const lines = cmds.map(c => {
-        const btns = c.buttonsJson ? (JSON.parse(c.buttonsJson) as {text:string}[]).map(b => b.text).join(", ") : "no buttons";
+        const btns = c.buttonsJson
+          ? (JSON.parse(c.buttonsJson) as { text: string }[]).map(b => b.text).join(", ")
+          : "no buttons";
         return `• <code>/${c.commandName}</code> — ${btns}`;
       });
       await bot.sendMessage(chatId,
-        `📋 <b>Custom Commands (${cmds.length})</b>\n\n${lines.join("\n")}\n\nUsers can type <code>/name</code> or just <code>name</code>`,
+        `📋 <b>Custom Commands (${cmds.length})</b>\n\n${lines.join("\n")}\n\nUsers type <code>/name</code> or just <code>name</code>`,
         { parse_mode: "HTML" });
       return;
     }
@@ -419,29 +423,54 @@ export function startCommandBot(): void {
     const deleteMatch = arg.match(/^delete\s+(\S+)$/i);
     if (deleteMatch) {
       const name = deleteMatch[1]!.toLowerCase();
-      const result = await db.delete(customCommandsTable)
+      await db.delete(customCommandsTable)
         .where(and(eq(customCommandsTable.botConfigId, config.id), eq(customCommandsTable.commandName, name)));
       await bot.sendMessage(chatId, `🗑 Command <code>/${name}</code> deleted.`, { parse_mode: "HTML" });
       return;
     }
 
-    // /filter <name> — start creating command
-    const commandName = arg.toLowerCase().replace(/[^a-z0-9_]/g, "");
-    if (!commandName) {
+    // /filter <name> <message> — one-liner, saves immediately
+    const spaceIdx = arg.search(/\s/);
+    if (spaceIdx === -1 || !arg.slice(spaceIdx + 1).trim()) {
+      // No message provided — show usage
       await bot.sendMessage(chatId,
-        `🛠 <b>Custom Command Builder</b>\n\n` +
-        `<b>Create:</b> <code>/filter &lt;name&gt;</code>\n` +
+        `🛠 <b>Custom Commands</b>\n\n` +
+        `<b>Create:</b>\n<code>/filter &lt;name&gt; &lt;message or link&gt;</code>\n\n` +
+        `<b>Examples:</b>\n` +
+        `<code>/filter website https://horny.xyz</code>\n` +
+        `<code>/filter ca Contract: 69HZn...</code>\n` +
+        `<code>/filter buy Get it on Jupiter 🚀</code>\n\n` +
         `<b>List all:</b> <code>/filter list</code>\n` +
         `<b>Delete:</b> <code>/filter delete &lt;name&gt;</code>\n\n` +
-        `Example: <code>/filter ca</code> → users type <code>/ca</code> or <code>ca</code>`,
+        `Users type <code>/name</code> or just <code>name</code> to trigger it.`,
         { parse_mode: "HTML" });
       return;
     }
 
-    pendingState.set(chatId, { step: "await_filter_message", commandName });
+    const commandName = arg.slice(0, spaceIdx).toLowerCase().replace(/[^a-z0-9_]/g, "");
+    const messageText = arg.slice(spaceIdx + 1).trim();
+
+    if (!commandName) {
+      await bot.sendMessage(chatId, `❌ Command name must be letters/numbers only.`);
+      return;
+    }
+
+    // Upsert
+    await db.delete(customCommandsTable)
+      .where(and(eq(customCommandsTable.botConfigId, config.id), eq(customCommandsTable.commandName, commandName)));
+    await db.insert(customCommandsTable).values({ botConfigId: config.id, commandName, messageText, buttonsJson: null });
+
     await bot.sendMessage(chatId,
-      `✏️ Creating command <code>/${commandName}</code>\n\nWhat message should users see when they type it? (Can include links, text, anything)`,
-      { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+      `✅ <b>/<code>${commandName}</code></b> saved!\n\nUsers can now type <code>/${commandName}</code> or <code>${commandName}</code>\n\nWant to add buttons under the message?`,
+      {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [[
+            { text: "➕ Add Buttons", callback_data: `filter_add_btn:${commandName}` },
+            { text: "✅ Done", callback_data: `filter_done:${commandName}` },
+          ]],
+        },
+      });
   });
 
   // ── Shared: process a token address lookup + save ─────────────────────────
@@ -623,6 +652,29 @@ export function startCommandBot(): void {
     await bot.answerCallbackQuery(query.id);
 
     const config = await getOrCreate(chatId, query.message.chat.title);
+
+    // filter_add_btn — admin wants to add buttons to a custom command
+    if (data.startsWith("filter_add_btn:")) {
+      const commandName = data.slice("filter_add_btn:".length);
+      const [cmd] = await db.select().from(customCommandsTable)
+        .where(and(eq(customCommandsTable.botConfigId, config.id), eq(customCommandsTable.commandName, commandName)))
+        .limit(1);
+      if (!cmd) {
+        await bot.sendMessage(chatId, `❌ Command not found.`);
+        return;
+      }
+      pendingState.set(chatId, { step: "await_filter_buttons", commandName, messageText: cmd.messageText });
+      await bot.sendMessage(chatId,
+        `➕ Adding buttons to <code>/${commandName}</code>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://horny.xyz</code>\n<code>🛒 Buy | https://jup.ag</code>`,
+        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+      return;
+    }
+
+    // filter_done — admin dismissed the add-buttons prompt
+    if (data.startsWith("filter_done:")) {
+      await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: msgId }).catch(() => null);
+      return;
+    }
 
     // Add Token → chain picker
     if (data === "action:add_token") {
@@ -1232,65 +1284,36 @@ export function startCommandBot(): void {
       return;
     }
 
-    // ── /filter step 1: admin sends the message text ──────────────────────────
-    if (state.step === "await_filter_message") {
-      const messageText = (msg.text ?? "").trim();
-      if (!messageText) return;
-      pendingState.delete(chatId);
-      const { commandName } = state;
-      // Ask if they want buttons
-      pendingState.set(chatId, { step: "await_filter_buttons", commandName, messageText });
-      await bot.sendMessage(chatId,
-        `✅ Message saved!\n\nDo you want to add inline buttons under this message?\n\n` +
-        `<b>Send button lines like:</b>\n<code>Visit Website | https://...</code>\n<code>Buy Now | https://...</code>\n\n` +
-        `One button per line. Or send <code>skip</code> for no buttons.`,
-        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
-      return;
-    }
-
-    // ── /filter step 2: admin sends buttons or "skip" ─────────────────────────
+    // ── /filter buttons: admin sends button lines after clicking "Add Buttons" ──
     if (state.step === "await_filter_buttons") {
       const rawText = (msg.text ?? "").trim();
       const { commandName, messageText } = state;
-      pendingState.delete(chatId);
 
-      let buttonsJson: string | null = null;
-      if (rawText.toLowerCase() !== "skip") {
-        const lines = rawText.split("\n").filter(Boolean).slice(0, 5);
-        const buttons: { text: string; url: string }[] = [];
-        for (const line of lines) {
-          const parts = line.split("|").map((s) => s.trim());
-          const btnText = parts[0];
-          const btnUrl = parts[1];
-          if (!btnText || !btnUrl || !btnUrl.startsWith("http")) {
-            await bot.sendMessage(chatId,
-              `❌ Invalid line: <code>${line}</code>\nFormat: <code>Button Label | https://url</code>`,
-              { parse_mode: "HTML" });
-            pendingState.set(chatId, { step: "await_filter_buttons", commandName, messageText });
-            return;
-          }
-          buttons.push({ text: btnText, url: btnUrl });
+      const lines = rawText.split("\n").filter(Boolean).slice(0, 5);
+      const buttons: { text: string; url: string }[] = [];
+      for (const line of lines) {
+        const parts = line.split("|").map((s) => s.trim());
+        const btnText = parts[0];
+        const btnUrl = parts[1];
+        if (!btnText || !btnUrl || !btnUrl.startsWith("http")) {
+          await bot.sendMessage(chatId,
+            `❌ Invalid line: <code>${line}</code>\n\nFormat: <code>Button Label | https://url</code>\n\nOne button per line. Send again:`,
+            { parse_mode: "HTML" });
+          return;
         }
-        if (buttons.length > 0) buttonsJson = JSON.stringify(buttons);
+        buttons.push({ text: btnText, url: btnUrl });
       }
 
-      // Upsert (delete existing + insert new)
-      const config = await getOrCreate(chatId);
-      await db.delete(customCommandsTable)
-        .where(and(eq(customCommandsTable.botConfigId, config.id), eq(customCommandsTable.commandName, commandName)));
-      await db.insert(customCommandsTable).values({
-        botConfigId: config.id,
-        commandName,
-        messageText,
-        buttonsJson,
-      });
+      pendingState.delete(chatId);
+      const buttonsJson = JSON.stringify(buttons);
+      const cfg = await getOrCreate(chatId);
+      await db.update(customCommandsTable)
+        .set({ buttonsJson })
+        .where(and(eq(customCommandsTable.botConfigId, cfg.id), eq(customCommandsTable.commandName, commandName)));
 
-      const preview = buttonsJson
-        ? `\n\nButtons: ${(JSON.parse(buttonsJson) as {text:string}[]).map(b => b.text).join(" | ")}`
-        : "\n\nNo buttons.";
       await bot.sendMessage(chatId,
-        `✅ <b>Command <code>/${commandName}</code> saved!</b>\n\n` +
-        `Users can now type <code>/${commandName}</code> or just <code>${commandName}</code> in the group.${preview}`,
+        `✅ ${buttons.length} button(s) added to <code>/${commandName}</code>!\n\n` +
+        `${buttons.map(b => `• ${b.text}`).join("\n")}`,
         { parse_mode: "HTML" });
       return;
     }
