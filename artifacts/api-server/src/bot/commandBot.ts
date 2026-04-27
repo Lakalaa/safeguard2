@@ -326,6 +326,61 @@ export function startCommandBot(): void {
     logger.error({ msg: String(err) }, "Telegram polling error");
   });
 
+  // ── Auto-mute: "fake", "scam", "not real" ─────────────────────────────────
+  bot.on("message", async (msg) => {
+    if (!msg.from || !msg.text) return;
+    if (msg.chat.type === "private") return;
+
+    const text = msg.text.toLowerCase();
+    const BANNED = ["fake", "scam", "not real"];
+    const triggered = BANNED.some((kw) => text.includes(kw));
+    if (!triggered) return;
+
+    const chatId = String(msg.chat.id);
+    const userId = msg.from.id;
+
+    // Never mute admins
+    const admin = await isAdmin(bot, chatId, userId);
+    if (admin) return;
+
+    try {
+      // Mute for 24 hours
+      const until = Math.floor(Date.now() / 1000) + 60 * 60 * 24;
+      await bot.restrictChatMember(chatId, userId, {
+        permissions: {
+          can_send_messages: false,
+          can_send_audios: false,
+          can_send_documents: false,
+          can_send_photos: false,
+          can_send_videos: false,
+          can_send_video_notes: false,
+          can_send_voice_notes: false,
+          can_send_polls: false,
+          can_send_other_messages: false,
+          can_add_web_page_previews: false,
+          can_change_info: false,
+          can_invite_users: false,
+          can_pin_messages: false,
+        },
+        until_date: until,
+      });
+
+      // Delete the offending message
+      await bot.deleteMessage(chatId, msg.message_id).catch(() => null);
+
+      const name = msg.from.first_name ?? "User";
+      await bot.sendMessage(
+        chatId,
+        `🔇 <b>${name}</b> has been muted for 24 hours.\n\n⚠️ Spreading FUD (fake, scam, not real) is not allowed in this group.`,
+        { parse_mode: "HTML" },
+      );
+
+      logger.info({ chatId, userId, text: msg.text }, "Auto-muted user for FUD");
+    } catch (err) {
+      logger.warn({ err, chatId, userId }, "Failed to mute user (bot may lack admin rights)");
+    }
+  });
+
   // ── /ca — public contract address lookup (any user, any chain) ───────────
   bot.onText(/^\/ca(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
     const chatId = String(msg.chat.id);
