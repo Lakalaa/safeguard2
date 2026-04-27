@@ -6,7 +6,7 @@ import { logger } from "../lib/logger";
 import { getChainConfig, detectChainFromAddress } from "./chains/chainConfig";
 import { SolanaMonitor, type BuyEvent } from "./chains/solanaMonitor";
 import { EvmMonitor } from "./chains/evmMonitor";
-import { getNativePrice } from "./chains/priceService";
+import { getNativePrice, getTrendingInfo } from "./chains/priceService";
 import type { BotConfig } from "@workspace/db";
 
 export interface DexScreenerPair {
@@ -86,6 +86,8 @@ interface AlertParams {
   telegramUrl?: string | null;
   twitterUrl?: string | null;
   websiteUrl?: string | null;
+  trendingRank: number | null;     // position in DexScreener boosts leaderboard, null if not trending
+  dexPaidScore: number | null;     // total boost amount ("Dex Paid" score), null if 0
 }
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -102,6 +104,10 @@ function buildSosanaMessage(params: AlertParams): string {
   const buyLabel = params.tier === 3 ? "🐋 Whale Buy!" : "Buy!";
   const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
   const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
+
+  const trendingLine = params.trendingRank !== null
+    ? `\n📡 Trending #${params.trendingRank}`
+    : "";
 
   const nativeStr = params.amountNative > 0
     ? ` (${params.amountNative.toFixed(3)} ${params.nativeCurrency})`
@@ -123,7 +129,8 @@ function buildSosanaMessage(params: AlertParams): string {
   const linksLine = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
   return (
-    `<b>${params.tokenName} ${buyLabel}</b>\n` +
+    `<b>${params.tokenName} ${buyLabel}</b>` +
+    trendingLine + `\n` +
     `${emojiBar(params)}\n\n` +
     `🔀 Spent <b>${formatNumber(params.amountUsd)}</b>${nativeStr}\n` +
     `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
@@ -139,11 +146,16 @@ function buildSosanaKeyboard(_params: AlertParams): TelegramBot.InlineKeyboardMa
 }
 
 // ── Style 2: Trending ──────────────────────────────────────────────────────────
-// Richer format with social links and inline buy/dex buttons.
+// Richer format with real trending rank, social links and inline buy/dex buttons.
 function buildTrendingMessage(params: AlertParams): string {
   const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
   const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
   const shortBuyer = `${params.buyerAddress.slice(0, 6)}…${params.buyerAddress.slice(-4)}`;
+
+  // Trending rank line shown immediately after the title (matching reference image)
+  const trendingHeaderLine = params.trendingRank !== null
+    ? `\n📡 Trending #${params.trendingRank}`
+    : "";
 
   const nativeStr = params.amountNative > 0
     ? `${params.amountNative.toFixed(3)} ${params.nativeCurrency} (${formatNumber(params.amountUsd)})`
@@ -163,15 +175,26 @@ function buildTrendingMessage(params: AlertParams): string {
   if (params.websiteUrl) socialParts.push(`<a href="${params.websiteUrl}">Website</a>`);
   const socialLine = socialParts.length > 0 ? `\n👥| ${socialParts.join(" | ")}` : "";
 
+  // Dex Paid score + repeat trending rank footer (matching reference image 1)
+  const dexPaidLine = params.dexPaidScore !== null && params.dexPaidScore > 0
+    ? `\n🐺 Dex Paid ⚡ ${Math.round(params.dexPaidScore).toLocaleString("en-US")}`
+    : "";
+  const trendingFooterLine = params.trendingRank !== null
+    ? `\n🔴 Dex trending #${params.trendingRank}`
+    : "";
+
   return (
-    `<b>${params.tokenName} [${params.tokenSymbol}] Buy!</b>\n` +
+    `<b>${params.tokenName} [${params.tokenSymbol}] Buy!</b>` +
+    trendingHeaderLine + `\n` +
     `${emojiBar(params)}\n\n` +
     `💲| <b>${nativeStr}</b>\n` +
     `💼| Got: <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `👤| <a href="${buyerUrl}">${shortBuyer}</a> | <a href="${txUrl}">Txn</a>` +
     positionLine +
     mcapLine +
-    socialLine
+    socialLine +
+    dexPaidLine +
+    trendingFooterLine
   );
 }
 
@@ -346,6 +369,15 @@ class BotRegistry {
     const marketCap = dexData?.marketCap ?? dexData?.fdv ?? null;
     const priceChangePct = dexData?.priceChange?.h24 ?? null;
     const tokenPriceUsd = dexData?.priceUsd ? parseFloat(dexData.priceUsd) : 0;
+
+    // Fetch live trending rank from DexScreener boosts leaderboard (cached 5 min)
+    let trendingRank: number | null = null;
+    let dexPaidScore: number | null = null;
+    try {
+      const trendInfo = await getTrendingInfo(config.tokenAddress!, chainId);
+      trendingRank = trendInfo.rank;
+      dexPaidScore = trendInfo.dexPaidScore;
+    } catch { /* non-critical, skip */ }
     const amountUsd =
       event.amountUsd > 0.001
         ? event.amountUsd
@@ -409,6 +441,8 @@ class BotRegistry {
       telegramUrl: config.telegramUrl,
       twitterUrl: config.twitterUrl,
       websiteUrl: config.websiteUrl,
+      trendingRank,
+      dexPaidScore,
     };
     const message = buildAlertMessage(alertParams);
     const keyboard = buildAlertKeyboard(alertParams);

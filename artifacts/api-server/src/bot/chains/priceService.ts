@@ -3,6 +3,57 @@
  * Priority: DexScreener (always free, no rate limit) → CoinGecko (fallback, rate limited)
  */
 
+// ── Trending rank cache ────────────────────────────────────────────────────────
+interface BoostEntry {
+  chainId: string;
+  tokenAddress: string;
+  amount: number;
+  totalAmount: number;
+}
+
+let trendingCache: { entries: BoostEntry[]; fetchedAt: number } = { entries: [], fetchedAt: 0 };
+const TRENDING_TTL_MS = 5 * 60_000; // 5 minutes
+
+/**
+ * Fetch the DexScreener token boosts leaderboard and find the rank + boost score
+ * for a specific token. Returns null fields when the token is not in the top list.
+ */
+export async function getTrendingInfo(
+  tokenAddress: string,
+  chainId: string,
+): Promise<{ rank: number | null; dexPaidScore: number | null }> {
+  const now = Date.now();
+
+  // Refresh cache when stale
+  if (now - trendingCache.fetchedAt > TRENDING_TTL_MS) {
+    try {
+      const res = await fetch("https://api.dexscreener.com/token-boosts/top/v1", {
+        signal: AbortSignal.timeout(8_000),
+        headers: { Accept: "application/json" },
+      });
+      if (res.ok) {
+        const data = (await res.json()) as BoostEntry[];
+        if (Array.isArray(data) && data.length > 0) {
+          trendingCache = { entries: data, fetchedAt: now };
+        }
+      }
+    } catch { /* keep stale */ }
+  }
+
+  const lower = tokenAddress.toLowerCase();
+  const idx = trendingCache.entries.findIndex(
+    (e) => e.tokenAddress?.toLowerCase() === lower && e.chainId?.toLowerCase() === chainId.toLowerCase(),
+  );
+
+  if (idx === -1) return { rank: null, dexPaidScore: null };
+
+  const entry = trendingCache.entries[idx]!;
+  return {
+    rank: idx + 1,
+    dexPaidScore: entry.totalAmount ?? entry.amount ?? null,
+  };
+}
+
 const cache: Record<string, { price: number; fetchedAt: number }> = {};
 const CACHE_TTL_MS = 60_000; // 1 minute
 
