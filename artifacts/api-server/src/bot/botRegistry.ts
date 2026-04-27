@@ -369,6 +369,13 @@ class BotRegistry {
     const existing = this.instances.get(configId);
     if (existing?.running) return { running: true };
 
+    // Clear any orphaned timers from a previous inactive-timer run before creating fresh instance
+    if (existing) {
+      if (existing.repeatTimer) { clearInterval(existing.repeatTimer); existing.repeatTimer = null; }
+      if (existing.raidTimer) { clearInterval(existing.raidTimer); existing.raidTimer = null; }
+      if (existing.voteTimer) { clearInterval(existing.voteTimer); existing.voteTimer = null; }
+    }
+
     const [config] = await db
       .select()
       .from(botConfigTable)

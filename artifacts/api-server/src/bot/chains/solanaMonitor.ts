@@ -14,22 +14,25 @@ export interface BuyEvent {
   amountUsd: number;
 }
 
-const POLL_INTERVAL_MS = 4_000;
-const SIG_BATCH = 30; // signatures to fetch per poll
+const POLL_INTERVAL_MS = 6_000;
+const SIG_BATCH = 15; // smaller batch = fewer tx fetches per poll = less rate pressure
+const TX_FETCH_DELAY_MS = 400; // pause between getParsedTransaction calls
 
-// Multiple free Solana mainnet RPC endpoints to try in order
+// Multiple free Solana mainnet RPC endpoints to rotate through
 const SOLANA_RPCS = [
   "https://api.mainnet-beta.solana.com",
   "https://solana.drpc.org",
   "https://solana-rpc.publicnode.com",
+  "https://rpc.ankr.com/solana",
 ];
 
 export class SolanaMonitor {
-  private connection: Connection | null = null;
+  private connections: Connection[] = [];
+  private currentRpcIndex = 0;
   private running = false;
   private tokenAddress: string;
   private onBuy: (event: BuyEvent) => void;
-  private lastSignature: string | null = null; // cursor: newest seen sig
+  private lastSignature: string | null = null;
   private seenSignatures = new Set<string>();
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -38,29 +41,51 @@ export class SolanaMonitor {
     this.onBuy = onBuy;
   }
 
+  private get connection(): Connection | null {
+    return this.connections[this.currentRpcIndex] ?? null;
+  }
+
+  private async rotateRpc(): Promise<void> {
+    const start = this.currentRpcIndex;
+    for (let i = 1; i < this.connections.length; i++) {
+      const idx = (start + i) % this.connections.length;
+      try {
+        await this.connections[idx]!.getSlot();
+        this.currentRpcIndex = idx;
+        logger.info({ rpc: SOLANA_RPCS[idx] }, "[Solana] Rotated to fallback RPC");
+        return;
+      } catch {
+        // try next
+      }
+    }
+    logger.warn("[Solana] All RPCs appear down — staying on current");
+  }
+
   async start(): Promise<void> {
-    // Try each RPC until one works
+    // Build connection pool — include any RPC that passes a health check
     for (const rpc of SOLANA_RPCS) {
       try {
         const conn = new Connection(rpc, { commitment: "confirmed" });
-        // Quick health-check
         await conn.getSlot();
-        this.connection = conn;
-        logger.info({ rpc, token: this.tokenAddress }, "[Solana] Connected to RPC");
-        break;
+        this.connections.push(conn);
+        logger.info({ rpc, token: this.tokenAddress }, "[Solana] RPC added to pool");
       } catch {
-        logger.warn({ rpc }, "[Solana] RPC unreachable — trying next");
+        logger.warn({ rpc }, "[Solana] RPC unreachable — skipping");
       }
     }
 
-    if (!this.connection) {
-      throw new Error("[Solana] All RPC endpoints failed");
+    // Fall back: if none passed the health check just include all of them anyway
+    if (this.connections.length === 0) {
+      this.connections = SOLANA_RPCS.map(rpc => new Connection(rpc, { commitment: "confirmed" }));
+      logger.warn("[Solana] No RPC passed health check — using full pool anyway");
     }
 
-    // Seed the cursor so we only process NEW transactions going forward
+    logger.info({ rpc: SOLANA_RPCS[this.currentRpcIndex] }, "[Solana] Connected to RPC");
+
+    // Seed cursor so we only fire on NEW transactions
     try {
       const mintPubkey = new PublicKey(this.tokenAddress);
-      const recent = await this.connection.getSignaturesForAddress(mintPubkey, { limit: 1 });
+      const recent = await this.connection!.getSignaturesForAddress(mintPubkey, { limit: 1 });
       if (recent.length > 0 && recent[0]) {
         this.lastSignature = recent[0].signature;
         logger.info({ cursor: this.lastSignature }, "[Solana] Starting cursor set");
@@ -80,7 +105,7 @@ export class SolanaMonitor {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
     }
-    this.connection = null;
+    this.connections = [];
     logger.info({ token: this.tokenAddress }, "[Solana] Monitor stopped");
   }
 
@@ -99,7 +124,6 @@ export class SolanaMonitor {
 
     const mintPubkey = new PublicKey(this.tokenAddress);
 
-    // `until` = "return sigs newer than this one" (exclusive)
     const opts: { limit: number; until?: string } = { limit: SIG_BATCH };
     if (this.lastSignature) opts.until = this.lastSignature;
 
@@ -107,7 +131,9 @@ export class SolanaMonitor {
     try {
       sigs = await this.connection.getSignaturesForAddress(mintPubkey, opts);
     } catch (err) {
-      logger.warn({ err: String(err) }, "[Solana] getSignaturesForAddress error");
+      const msg = String(err);
+      logger.warn({ err: msg }, "[Solana] getSignaturesForAddress error");
+      if (msg.includes("429")) await this.rotateRpc();
       return;
     }
 
@@ -118,7 +144,7 @@ export class SolanaMonitor {
     // Update cursor to the newest signature (sigs are newest-first)
     this.lastSignature = sigs[0]!.signature;
 
-    // Process oldest → newest
+    // Process oldest → newest, with a small delay to avoid rate-limiting
     for (const sigInfo of [...sigs].reverse()) {
       if (sigInfo.err) continue;
       if (this.seenSignatures.has(sigInfo.signature)) continue;
@@ -131,10 +157,19 @@ export class SolanaMonitor {
         arr.slice(-500).forEach((s) => this.seenSignatures.add(s));
       }
 
+      // Throttle between fetches
+      await new Promise<void>((resolve) => setTimeout(resolve, TX_FETCH_DELAY_MS));
+
       try {
         await this.processTx(sigInfo.signature);
       } catch (err) {
-        logger.warn({ err: String(err), sig: sigInfo.signature }, "[Solana] processTx error");
+        const msg = String(err);
+        logger.warn({ err: msg, sig: sigInfo.signature }, "[Solana] processTx error");
+        if (msg.includes("429")) {
+          await this.rotateRpc();
+          // Brief extra pause after a 429 before continuing
+          await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+        }
       }
     }
   }
@@ -173,7 +208,6 @@ export class SolanaMonitor {
       buyerAddress = post.owner ?? null;
 
       if (buyerAddress) {
-        // Find the buyer's SOL balance change
         for (let i = 0; i < accountKeys.length; i++) {
           const key = accountKeys[i];
           if (!key) continue;
@@ -192,7 +226,7 @@ export class SolanaMonitor {
       // Fallback: use fee payer SOL diff if no buyer balance found
       if (amountNative === 0 && preBalances[0] !== undefined && postBalances[0] !== undefined) {
         const feeDiff = (preBalances[0] - postBalances[0]) / 1e9;
-        if (feeDiff > 0.0001) amountNative = feeDiff; // ignore pure fee txs
+        if (feeDiff > 0.0001) amountNative = feeDiff;
       }
 
       break;
