@@ -96,6 +96,9 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
         { text: hasSocial ? "👥 Social ✅" : "👥 Social Links", callback_data: "cfg:social" },
       ],
       [
+        { text: `⏰ Repeat: ${formatInterval(config.repeatInterval)}`, callback_data: "cfg:repeat" },
+      ],
+      [
         {
           text: running ? "⏹ Stop" : "▶️ Start Monitoring",
           callback_data: running ? "action:stop" : "action:start",
@@ -104,6 +107,40 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
       ],
     ],
   };
+}
+
+function formatInterval(secs: number | null | undefined): string {
+  if (!secs) return "Off";
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3600) return `${secs / 60}min`;
+  return `${secs / 3600}hr`;
+}
+
+function repeatKeyboard(current: number | null | undefined): TelegramBot.InlineKeyboardMarkup {
+  const presets = [
+    { label: "Off", secs: 0 },
+    { label: "30s", secs: 30 },
+    { label: "1min", secs: 60 },
+    { label: "5min", secs: 300 },
+    { label: "15min", secs: 900 },
+    { label: "30min", secs: 1800 },
+    { label: "1hr", secs: 3600 },
+    { label: "6hr", secs: 21600 },
+    { label: "12hr", secs: 43200 },
+    { label: "24hr", secs: 86400 },
+  ];
+  const cur = current ?? 0;
+  const rows: TelegramBot.InlineKeyboardButton[][] = [];
+  for (let i = 0; i < presets.length; i += 5) {
+    rows.push(
+      presets.slice(i, i + 5).map((p) => ({
+        text: p.secs === cur ? `✅ ${p.label}` : p.label,
+        callback_data: `set:repeat:${p.secs}`,
+      })),
+    );
+  }
+  rows.push([{ text: "⬅️ Back", callback_data: "action:settings" }]);
+  return { inline_keyboard: rows };
 }
 
 function styleKeyboard(current: string): TelegramBot.InlineKeyboardMarkup {
@@ -207,10 +244,84 @@ export function startCommandBot(): void {
     { command: "start", description: "Start buy alert monitoring" },
     { command: "stop", description: "Stop monitoring" },
     { command: "status", description: "Check current status" },
+    { command: "ca", description: "Look up any token — /ca <address>" },
   ]).catch(() => null);
 
   bot.on("polling_error", (err) => {
     logger.error({ msg: String(err) }, "Telegram polling error");
+  });
+
+  // ── /ca — public contract address lookup (any user, any chain) ───────────
+  bot.onText(/^\/ca(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
+    const chatId = String(msg.chat.id);
+    const address = match?.[1]?.trim();
+    if (!address) {
+      await bot.sendMessage(chatId,
+        `🔍 <b>Token Lookup</b>\n\nUsage: <code>/ca TOKEN_ADDRESS</code>\n\nWorks on all chains — Solana, Ethereum, BSC, Base, Polygon, Arbitrum, Avalanche, Optimism.`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
+    const lookupMsg = await bot.sendMessage(chatId, `🔍 Looking up <code>${address.slice(0, 10)}…</code> on DexScreener…`, { parse_mode: "HTML" });
+    try {
+      const dexData = await getDexScreenerData(address);
+      if (!dexData) {
+        await bot.editMessageText(
+          `❌ Token not found. Make sure the address is correct and the token has a trading pair.`,
+          { chat_id: chatId, message_id: lookupMsg.message_id },
+        ).catch(() => null);
+        return;
+      }
+
+      const name = dexData.baseToken.name;
+      const symbol = dexData.baseToken.symbol;
+      const chain = dexData.chainId ?? "?";
+      const chainLabel = CHAIN_LABELS[chain] ?? chain;
+      const screenerUrl = dexData.url ?? `https://dexscreener.com/${chain}/${address}`;
+
+      const price = dexData.priceUsd ? parseFloat(dexData.priceUsd) : null;
+      const priceStr = price === null ? "—"
+        : price < 0.000001 ? `$${price.toFixed(10)}`
+        : price < 0.001 ? `$${price.toFixed(8)}`
+        : price < 1 ? `$${price.toFixed(6)}`
+        : `$${price.toFixed(4)}`;
+
+      const change24h = dexData.priceChange?.h24 ?? null;
+      const changeEmoji = change24h === null ? "" : change24h >= 0 ? "📈 " : "📉 ";
+      const changeStr = change24h !== null ? `${changeEmoji}<b>${change24h >= 0 ? "+" : ""}${change24h.toFixed(1)}%</b>` : "—";
+
+      const mcap = dexData.marketCap ?? dexData.fdv ?? null;
+      const mcapStr = mcap !== null ? `$${Math.round(mcap).toLocaleString("en-US")}` : "—";
+
+      const liq = dexData.liquidity?.usd ?? null;
+      const liqStr = liq === null ? "—"
+        : liq >= 1_000_000 ? `$${(liq / 1_000_000).toFixed(2)}M`
+        : liq >= 1_000 ? `$${(liq / 1_000).toFixed(1)}K`
+        : `$${Math.round(liq)}`;
+
+      const text =
+        `🔍 <b>${name} [${symbol}]</b>\n` +
+        `⛓ ${chainLabel}\n\n` +
+        `💲 Price: <b>${priceStr}</b>\n` +
+        `24h: ${changeStr}\n` +
+        `💰 Market Cap: <b>${mcapStr}</b>\n` +
+        `💧 Liquidity: <b>${liqStr}</b>\n\n` +
+        `📋 Contract:\n<code>${address}</code>\n\n` +
+        `<a href="${screenerUrl}">📈 View on DexScreener</a>`;
+
+      await bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: lookupMsg.message_id,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+      }).catch(() => null);
+    } catch {
+      await bot.editMessageText(`❌ Error looking up token. Please try again.`, {
+        chat_id: chatId,
+        message_id: lookupMsg.message_id,
+      }).catch(() => null);
+    }
   });
 
   // ── Shared: process a token address lookup + save ─────────────────────────
@@ -519,6 +630,30 @@ export function startCommandBot(): void {
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running, msgId);
       await bot.answerCallbackQuery(query.id, { text: `✅ Style set to ${newStyle === "trending" ? "Trending" : "SOSANA"}` });
+      return;
+    }
+
+    // Repeat timer picker
+    if (data === "cfg:repeat") {
+      await bot.editMessageText(
+        `⏰ <b>Repeat Post Interval</b>\n\n` +
+        `The bot will post a live token stats update (price, market cap, liquidity) at the selected interval.\n\n` +
+        `This is <b>real DexScreener data</b> — not a fake buy. Set <b>Off</b> to disable.`,
+        { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: repeatKeyboard(config.repeatInterval) },
+      ).catch(() => null);
+      return;
+    }
+
+    if (data.startsWith("set:repeat:")) {
+      const secs = parseInt(data.split(":")[2] ?? "0");
+      const interval = secs > 0 ? secs : null;
+      await db.update(botConfigTable).set({ repeatInterval: interval, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      botRegistry.restartRepeatTimer(config.id, interval);
+      const updated = await getOrCreate(chatId);
+      const { running } = botRegistry.getStatus(updated.id);
+      await sendSettings(bot, chatId, updated, running, msgId);
+      const label = secs === 0 ? "disabled" : formatInterval(secs);
+      await bot.answerCallbackQuery(query.id, { text: `⏰ Repeat: ${label}` });
       return;
     }
 

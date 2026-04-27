@@ -228,6 +228,48 @@ interface BotInstance {
   error: string | null;
   monitor: SolanaMonitor | EvmMonitor | null;
   dexCache: { data: DexScreenerPair | null; fetchedAt: number };
+  repeatTimer: ReturnType<typeof setInterval> | null;
+}
+
+// ── Periodic repeat post (real live data, not a fake buy) ──────────────────────
+function buildRepeatMessage(config: BotConfig, dexData: DexScreenerPair | null, chainName: string): string {
+  const name = config.tokenName ?? dexData?.baseToken.name ?? "Token";
+  const symbol = config.tokenSymbol ?? dexData?.baseToken.symbol ?? "TKN";
+
+  const price = dexData?.priceUsd ? parseFloat(dexData.priceUsd) : null;
+  const priceStr = price === null ? "—"
+    : price < 0.000001 ? `$${price.toFixed(10)}`
+    : price < 0.001 ? `$${price.toFixed(8)}`
+    : price < 1 ? `$${price.toFixed(6)}`
+    : `$${price.toFixed(4)}`;
+
+  const change24h = dexData?.priceChange?.h24 ?? null;
+  const changeStr = change24h === null ? "—"
+    : `${change24h >= 0 ? "+" : ""}${change24h.toFixed(1)}%`;
+
+  const mcap = dexData?.marketCap ?? dexData?.fdv ?? null;
+  const mcapStr = mcap === null ? "—" : `$${Math.round(mcap).toLocaleString("en-US")}`;
+
+  const liq = dexData?.liquidity?.usd ?? null;
+  const liqStr = liq === null ? "—"
+    : liq >= 1_000_000 ? `$${(liq / 1_000_000).toFixed(2)}M`
+    : liq >= 1_000 ? `$${(liq / 1_000).toFixed(1)}K`
+    : `$${Math.round(liq)}`;
+
+  const linkParts: string[] = [];
+  if (config.dextUrl) linkParts.push(`<a href="${config.dextUrl}">DexT</a>`);
+  if (config.screenerUrl) linkParts.push(`<a href="${config.screenerUrl}">Screener</a>`);
+  if (config.buyUrl) linkParts.push(`<a href="${config.buyUrl}">Buy</a>`);
+  const linksLine = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
+
+  return (
+    `📊 <b>${name} [${symbol}]</b> — ${chainName}\n\n` +
+    `💲 Price: <b>${priceStr}</b>\n` +
+    `📈 24h: <b>${changeStr}</b>\n` +
+    `💰 Market Cap: <b>${mcapStr}</b>\n` +
+    `💧 Liquidity: <b>${liqStr}</b>` +
+    linksLine
+  );
 }
 
 /** Returns the bot token to use: stored in DB first, then TELEGRAM_BOT_TOKEN env var fallback */
@@ -271,6 +313,7 @@ class BotRegistry {
       error: null,
       monitor: null,
       dexCache: { data: null, fetchedAt: 0 },
+      repeatTimer: null,
     };
 
     try {
@@ -310,6 +353,17 @@ class BotRegistry {
 
       await inst.monitor.start();
       this.instances.set(configId, inst);
+
+      // Start repeat timer if configured
+      if (config.repeatInterval && config.repeatInterval > 0) {
+        inst.repeatTimer = setInterval(() => {
+          this.sendRepeatAlert(configId).catch((err) =>
+            logger.error({ err, configId }, "Repeat alert error"),
+          );
+        }, config.repeatInterval * 1000);
+        logger.info({ configId, intervalSecs: config.repeatInterval }, "Repeat timer started");
+      }
+
       logger.info({ configId, token: config.tokenAddress, chain: chainId }, "Bot started");
       return { running: true };
     } catch (err) {
@@ -324,6 +378,10 @@ class BotRegistry {
   async stop(configId: number): Promise<void> {
     const inst = this.instances.get(configId);
     if (!inst) return;
+    if (inst.repeatTimer) {
+      clearInterval(inst.repeatTimer);
+      inst.repeatTimer = null;
+    }
     if (inst.monitor) {
       await inst.monitor.stop();
       inst.monitor = null;
@@ -335,6 +393,50 @@ class BotRegistry {
       .where(eq(botConfigTable.id, configId));
     this.instances.set(configId, inst);
     logger.info({ configId }, "Bot stopped");
+  }
+
+  /** Swap the repeat timer live — called when admin changes the interval via /setup */
+  restartRepeatTimer(configId: number, intervalSecs: number | null): void {
+    const inst = this.instances.get(configId);
+    if (!inst || !inst.running) return;
+
+    if (inst.repeatTimer) {
+      clearInterval(inst.repeatTimer);
+      inst.repeatTimer = null;
+    }
+
+    const secs = intervalSecs ?? 0;
+    if (secs > 0) {
+      inst.repeatTimer = setInterval(() => {
+        this.sendRepeatAlert(configId).catch((err) =>
+          logger.error({ err, configId }, "Repeat alert error"),
+        );
+      }, secs * 1000);
+      logger.info({ configId, intervalSecs: secs }, "Repeat timer updated");
+    }
+    this.instances.set(configId, inst);
+  }
+
+  private async sendRepeatAlert(configId: number): Promise<void> {
+    const [config] = await db
+      .select().from(botConfigTable).where(eq(botConfigTable.id, configId)).limit(1);
+    const token = resolveToken(config);
+    if (!token || !config?.chatId || !config.tokenAddress) return;
+
+    const inst = this.instances.get(configId);
+    if (!inst) return;
+
+    const dexData = await this.getCachedDexData(config.tokenAddress, inst);
+    const chainConfig = getChainConfig(inst.chainId);
+    const chainName = chainConfig?.name ?? inst.chainId;
+
+    const message = buildRepeatMessage(config, dexData, chainName);
+    const tgBot = new TelegramBot(token, { polling: false });
+    await tgBot.sendMessage(config.chatId, message, {
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+    });
+    logger.info({ configId }, "Repeat alert sent");
   }
 
   async autoStartAll(): Promise<void> {

@@ -31,6 +31,7 @@ export const botConfigTable = pgTable("bot_config", {
   alertMediaFileId: text("alert_media_file_id"),
   alertMediaType: text("alert_media_type"),
   alertStyle: text("alert_style").notNull().default("sosana"), // "sosana" | "trending"
+  repeatInterval: integer("repeat_interval"), // seconds between periodic stat posts; null = off
   telegramUrl: text("telegram_url"),
   twitterUrl: text("twitter_url"),
   websiteUrl: text("website_url"),
