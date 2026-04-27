@@ -55,6 +55,18 @@ export const botConfigTable = pgTable("bot_config", {
     .defaultNow(),
 });
 
+// Custom commands created by admins via /filter
+export const customCommandsTable = pgTable("custom_commands", {
+  id: serial("id").primaryKey(),
+  botConfigId: integer("bot_config_id").references(() => botConfigTable.id, { onDelete: "cascade" }),
+  commandName: text("command_name").notNull(), // e.g. "website", "ca", "whitepaper"
+  messageText: text("message_text").notNull(),
+  buttonsJson: text("buttons_json"),           // JSON: [{text, url}]
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type CustomCommand = typeof customCommandsTable.$inferSelect;
+
 export const alertsTable = pgTable("alerts", {
   id: serial("id").primaryKey(),
   botConfigId: integer("bot_config_id").references(() => botConfigTable.id),

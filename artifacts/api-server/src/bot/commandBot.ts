@@ -1,7 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import { db } from "@workspace/db";
-import { botConfigTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { botConfigTable, customCommandsTable } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
 import { botRegistry, getDexScreenerData } from "./botRegistry";
 import { logger } from "../lib/logger";
 import type { BotConfig } from "@workspace/db";
@@ -35,7 +35,9 @@ type PendingState =
   | { step: "await_vote_count" }
   | { step: "await_vote_position" }
   | { step: "await_vote_image" }
-  | { step: "await_vote_buttons" };
+  | { step: "await_vote_buttons" }
+  | { step: "await_filter_message"; commandName: string }
+  | { step: "await_filter_buttons"; commandName: string; messageText: string };
 
 const pendingState = new Map<string, PendingState>();
 
@@ -319,8 +321,7 @@ export function startCommandBot(): void {
     { command: "start", description: "Start buy alert monitoring" },
     { command: "stop", description: "Stop monitoring" },
     { command: "status", description: "Check current status" },
-    { command: "ca", description: "Show token contract address" },
-    { command: "website", description: "Show project website" },
+    { command: "filter", description: "Admin: create/manage custom commands" },
   ]).catch(() => null);
 
   bot.on("polling_error", (err) => {
@@ -383,53 +384,64 @@ export function startCommandBot(): void {
   });
 
 
-  // ── /ca — show contract address + buttons ─────────────────────────────────
-  bot.onText(/^\/ca(?:@\w+)?$/i, async (msg) => {
+  // ── /filter — admin custom command builder ────────────────────────────────
+  bot.onText(/^\/filter(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
     const chatId = String(msg.chat.id);
-    const config = await getOrCreate(chatId);
-    const addr = config.tokenAddress;
-    const name = config.tokenName ?? config.tokenSymbol ?? "Token";
-    const symbol = config.tokenSymbol ?? "";
-
-    if (!addr) {
-      await bot.sendMessage(chatId, `❌ No token configured yet. Use /add to set one.`);
+    const userId = msg.from?.id;
+    if (!userId || !await isAdmin(bot, chatId, userId)) {
+      await bot.sendMessage(chatId, `🔒 Only admins can manage custom commands.`);
       return;
     }
 
-    const buttons: TelegramBot.InlineKeyboardButton[] = [];
-    if (config.dextUrl) buttons.push({ text: "📊 DexTools", url: config.dextUrl });
-    if (config.screenerUrl) buttons.push({ text: "📈 DexScreener", url: config.screenerUrl });
-    if (config.buyUrl) buttons.push({ text: "🛒 Buy", url: config.buyUrl });
-
-    const text = `📋 <b>${name}${symbol && symbol !== name ? ` [${symbol}]` : ""} — Contract Address</b>\n\n<code>${addr}</code>`;
-    await bot.sendMessage(chatId, text, {
-      parse_mode: "HTML",
-      ...(buttons.length > 0 ? { reply_markup: { inline_keyboard: [buttons] } } : {}),
-    });
-  });
-
-  // ── /website — show project website ───────────────────────────────────────
-  bot.onText(/^\/website(?:@\w+)?$/i, async (msg) => {
-    const chatId = String(msg.chat.id);
+    const arg = match?.[1]?.trim() ?? "";
     const config = await getOrCreate(chatId);
-    const name = config.tokenName ?? config.tokenSymbol ?? "Token";
 
-    if (!config.websiteUrl) {
-      await bot.sendMessage(chatId, `❌ No website configured. An admin can set it via /setup → Links.`);
+    // /filter list
+    if (arg.toLowerCase() === "list") {
+      const cmds = await db.select().from(customCommandsTable)
+        .where(eq(customCommandsTable.botConfigId, config.id))
+        .orderBy(customCommandsTable.commandName);
+      if (cmds.length === 0) {
+        await bot.sendMessage(chatId, `📋 No custom commands set up yet.\n\nUse <code>/filter &lt;name&gt;</code> to create one.`, { parse_mode: "HTML" });
+        return;
+      }
+      const lines = cmds.map(c => {
+        const btns = c.buttonsJson ? (JSON.parse(c.buttonsJson) as {text:string}[]).map(b => b.text).join(", ") : "no buttons";
+        return `• <code>/${c.commandName}</code> — ${btns}`;
+      });
+      await bot.sendMessage(chatId,
+        `📋 <b>Custom Commands (${cmds.length})</b>\n\n${lines.join("\n")}\n\nUsers can type <code>/name</code> or just <code>name</code>`,
+        { parse_mode: "HTML" });
       return;
     }
 
-    const buttons: TelegramBot.InlineKeyboardButton[] = [
-      { text: "🌐 Visit Website", url: config.websiteUrl },
-    ];
-    if (config.telegramUrl) buttons.push({ text: "💬 Telegram", url: config.telegramUrl });
-    if (config.twitterUrl) buttons.push({ text: "🐦 X / Twitter", url: config.twitterUrl });
+    // /filter delete <name>
+    const deleteMatch = arg.match(/^delete\s+(\S+)$/i);
+    if (deleteMatch) {
+      const name = deleteMatch[1]!.toLowerCase();
+      const result = await db.delete(customCommandsTable)
+        .where(and(eq(customCommandsTable.botConfigId, config.id), eq(customCommandsTable.commandName, name)));
+      await bot.sendMessage(chatId, `🗑 Command <code>/${name}</code> deleted.`, { parse_mode: "HTML" });
+      return;
+    }
 
-    const text = `🌐 <b>${name} — Official Links</b>`;
-    await bot.sendMessage(chatId, text, {
-      parse_mode: "HTML",
-      reply_markup: { inline_keyboard: [buttons] },
-    });
+    // /filter <name> — start creating command
+    const commandName = arg.toLowerCase().replace(/[^a-z0-9_]/g, "");
+    if (!commandName) {
+      await bot.sendMessage(chatId,
+        `🛠 <b>Custom Command Builder</b>\n\n` +
+        `<b>Create:</b> <code>/filter &lt;name&gt;</code>\n` +
+        `<b>List all:</b> <code>/filter list</code>\n` +
+        `<b>Delete:</b> <code>/filter delete &lt;name&gt;</code>\n\n` +
+        `Example: <code>/filter ca</code> → users type <code>/ca</code> or <code>ca</code>`,
+        { parse_mode: "HTML" });
+      return;
+    }
+
+    pendingState.set(chatId, { step: "await_filter_message", commandName });
+    await bot.sendMessage(chatId,
+      `✏️ Creating command <code>/${commandName}</code>\n\nWhat message should users see when they type it? (Can include links, text, anything)`,
+      { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
   });
 
   // ── Shared: process a token address lookup + save ─────────────────────────
@@ -1220,6 +1232,69 @@ export function startCommandBot(): void {
       return;
     }
 
+    // ── /filter step 1: admin sends the message text ──────────────────────────
+    if (state.step === "await_filter_message") {
+      const messageText = (msg.text ?? "").trim();
+      if (!messageText) return;
+      pendingState.delete(chatId);
+      const { commandName } = state;
+      // Ask if they want buttons
+      pendingState.set(chatId, { step: "await_filter_buttons", commandName, messageText });
+      await bot.sendMessage(chatId,
+        `✅ Message saved!\n\nDo you want to add inline buttons under this message?\n\n` +
+        `<b>Send button lines like:</b>\n<code>Visit Website | https://...</code>\n<code>Buy Now | https://...</code>\n\n` +
+        `One button per line. Or send <code>skip</code> for no buttons.`,
+        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+      return;
+    }
+
+    // ── /filter step 2: admin sends buttons or "skip" ─────────────────────────
+    if (state.step === "await_filter_buttons") {
+      const rawText = (msg.text ?? "").trim();
+      const { commandName, messageText } = state;
+      pendingState.delete(chatId);
+
+      let buttonsJson: string | null = null;
+      if (rawText.toLowerCase() !== "skip") {
+        const lines = rawText.split("\n").filter(Boolean).slice(0, 5);
+        const buttons: { text: string; url: string }[] = [];
+        for (const line of lines) {
+          const parts = line.split("|").map((s) => s.trim());
+          const btnText = parts[0];
+          const btnUrl = parts[1];
+          if (!btnText || !btnUrl || !btnUrl.startsWith("http")) {
+            await bot.sendMessage(chatId,
+              `❌ Invalid line: <code>${line}</code>\nFormat: <code>Button Label | https://url</code>`,
+              { parse_mode: "HTML" });
+            pendingState.set(chatId, { step: "await_filter_buttons", commandName, messageText });
+            return;
+          }
+          buttons.push({ text: btnText, url: btnUrl });
+        }
+        if (buttons.length > 0) buttonsJson = JSON.stringify(buttons);
+      }
+
+      // Upsert (delete existing + insert new)
+      const config = await getOrCreate(chatId);
+      await db.delete(customCommandsTable)
+        .where(and(eq(customCommandsTable.botConfigId, config.id), eq(customCommandsTable.commandName, commandName)));
+      await db.insert(customCommandsTable).values({
+        botConfigId: config.id,
+        commandName,
+        messageText,
+        buttonsJson,
+      });
+
+      const preview = buttonsJson
+        ? `\n\nButtons: ${(JSON.parse(buttonsJson) as {text:string}[]).map(b => b.text).join(" | ")}`
+        : "\n\nNo buttons.";
+      await bot.sendMessage(chatId,
+        `✅ <b>Command <code>/${commandName}</code> saved!</b>\n\n` +
+        `Users can now type <code>/${commandName}</code> or just <code>${commandName}</code> in the group.${preview}`,
+        { parse_mode: "HTML" });
+      return;
+    }
+
     if (state.step === "await_raid_url") {
       const rawText = (msg.text ?? "").trim();
       const tweetId = rawText.match(/\/status\/(\d+)/)?.[1];
@@ -1270,6 +1345,48 @@ export function startCommandBot(): void {
       await sendSettings(bot, chatId, updated, running);
       return;
     }
+  });
+
+  // ── Dynamic custom command trigger (any user) ─────────────────────────────
+  // Fires when someone types "/ca", "ca", "/website", "website", etc.
+  bot.on("message", async (msg) => {
+    const chatId = String(msg.chat.id);
+    const text = msg.text?.trim();
+    if (!text) return;
+
+    // Skip messages being handled by pending state flows
+    if (pendingState.has(chatId)) return;
+
+    // Extract name: "/website" → "website", "website" → "website"
+    // Only single-word messages or slash-commands (no spaces)
+    const rawName = text.startsWith("/") ? text.split("@")[0]!.slice(1) : text;
+    if (rawName.includes(" ") || rawName.length === 0 || rawName.length > 30) return;
+    const commandName = rawName.toLowerCase();
+
+    // Skip built-in bot commands so they don't also fire here
+    const builtIn = new Set(["start","stop","status","add","token","setup","filter"]);
+    if (builtIn.has(commandName)) return;
+
+    const config = await getOrCreate(chatId).catch(() => null);
+    if (!config) return;
+
+    const [cmd] = await db.select().from(customCommandsTable)
+      .where(and(
+        eq(customCommandsTable.botConfigId, config.id),
+        eq(customCommandsTable.commandName, commandName),
+      )).limit(1);
+
+    if (!cmd) return;
+
+    const buttons = cmd.buttonsJson
+      ? (JSON.parse(cmd.buttonsJson) as { text: string; url: string }[])
+      : [];
+
+    await bot.sendMessage(chatId, cmd.messageText, {
+      parse_mode: "HTML",
+      disable_web_page_preview: false,
+      ...(buttons.length > 0 ? { reply_markup: { inline_keyboard: [buttons] } } : {}),
+    }).catch(() => null);
   });
 
   logger.info("Command bot started");
