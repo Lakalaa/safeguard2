@@ -319,7 +319,6 @@ export function startCommandBot(): void {
     { command: "start", description: "Start buy alert monitoring" },
     { command: "stop", description: "Stop monitoring" },
     { command: "status", description: "Check current status" },
-    { command: "filter", description: "Look up any token — /filter <address>" },
   ]).catch(() => null);
 
   bot.on("polling_error", (err) => {
@@ -381,78 +380,6 @@ export function startCommandBot(): void {
     }
   });
 
-  // ── /filter — public contract address lookup (any user, any chain) ──────
-  bot.onText(/^\/filter(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
-    const chatId = String(msg.chat.id);
-    const address = match?.[1]?.trim();
-    if (!address) {
-      await bot.sendMessage(chatId,
-        `🔍 <b>Token Lookup</b>\n\nUsage: <code>/filter TOKEN_ADDRESS</code>\n\nWorks on all chains — Solana, Ethereum, BSC, Base, Polygon, Arbitrum, Avalanche, Optimism.`,
-        { parse_mode: "HTML" },
-      );
-      return;
-    }
-
-    const lookupMsg = await bot.sendMessage(chatId, `🔍 Looking up <code>${address.slice(0, 10)}…</code> on DexScreener…`, { parse_mode: "HTML" });
-    try {
-      const dexData = await getDexScreenerData(address);
-      if (!dexData) {
-        await bot.editMessageText(
-          `❌ Token not found. Make sure the address is correct and the token has a trading pair.`,
-          { chat_id: chatId, message_id: lookupMsg.message_id },
-        ).catch(() => null);
-        return;
-      }
-
-      const name = dexData.baseToken.name;
-      const symbol = dexData.baseToken.symbol;
-      const chain = dexData.chainId ?? "?";
-      const chainLabel = CHAIN_LABELS[chain] ?? chain;
-      const screenerUrl = dexData.url ?? `https://dexscreener.com/${chain}/${address}`;
-
-      const price = dexData.priceUsd ? parseFloat(dexData.priceUsd) : null;
-      const priceStr = price === null ? "—"
-        : price < 0.000001 ? `$${price.toFixed(10)}`
-        : price < 0.001 ? `$${price.toFixed(8)}`
-        : price < 1 ? `$${price.toFixed(6)}`
-        : `$${price.toFixed(4)}`;
-
-      const change24h = dexData.priceChange?.h24 ?? null;
-      const changeEmoji = change24h === null ? "" : change24h >= 0 ? "📈 " : "📉 ";
-      const changeStr = change24h !== null ? `${changeEmoji}<b>${change24h >= 0 ? "+" : ""}${change24h.toFixed(1)}%</b>` : "—";
-
-      const mcap = dexData.marketCap ?? dexData.fdv ?? null;
-      const mcapStr = mcap !== null ? `$${Math.round(mcap).toLocaleString("en-US")}` : "—";
-
-      const liq = dexData.liquidity?.usd ?? null;
-      const liqStr = liq === null ? "—"
-        : liq >= 1_000_000 ? `$${(liq / 1_000_000).toFixed(2)}M`
-        : liq >= 1_000 ? `$${(liq / 1_000).toFixed(1)}K`
-        : `$${Math.round(liq)}`;
-
-      const text =
-        `🔍 <b>${name} [${symbol}]</b>\n` +
-        `⛓ ${chainLabel}\n\n` +
-        `💲 Price: <b>${priceStr}</b>\n` +
-        `24h: ${changeStr}\n` +
-        `💰 Market Cap: <b>${mcapStr}</b>\n` +
-        `💧 Liquidity: <b>${liqStr}</b>\n\n` +
-        `📋 Contract:\n<code>${address}</code>\n\n` +
-        `<a href="${screenerUrl}">📈 View on DexScreener</a>`;
-
-      await bot.editMessageText(text, {
-        chat_id: chatId,
-        message_id: lookupMsg.message_id,
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-      }).catch(() => null);
-    } catch {
-      await bot.editMessageText(`❌ Error looking up token. Please try again.`, {
-        chat_id: chatId,
-        message_id: lookupMsg.message_id,
-      }).catch(() => null);
-    }
-  });
 
   // ── Shared: process a token address lookup + save ─────────────────────────
   async function processTokenAddress(
