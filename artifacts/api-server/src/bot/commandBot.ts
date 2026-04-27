@@ -32,7 +32,6 @@ type PendingState =
   | { step: "await_social_website"; telegramUrl: string | null; twitterUrl: string | null }
   | { step: "await_raid_url" }
   | { step: "await_raid_targets"; tweetUrl: string }
-  | { step: "await_tier_thresholds" }
   | { step: "await_vote_count" }
   | { step: "await_vote_position" }
   | { step: "await_vote_image" }
@@ -237,47 +236,12 @@ function styleKeyboard(current: string): TelegramBot.InlineKeyboardMarkup {
   };
 }
 
-function filterKeyboard(config: BotConfig): TelegramBot.InlineKeyboardMarkup {
-  const min = config.minBuyUsd ?? 1;
-  const t1 = config.tier1Min ?? 100;
-  const t2 = config.tier2Min ?? 500;
-  const t3 = config.tier3Min ?? 1000;
-  return {
-    inline_keyboard: [
-      [{ text: `💵 Min Buy: $${min}`, callback_data: "cfg:min" }],
-      [{ text: `🏷 Set Tiers ($${t1} / $${t2} / $${t3})`, callback_data: "cfg:tiers" }],
-      [{ text: "⬅️ Back to Settings", callback_data: "action:settings" }],
-    ],
-  };
-}
-
-function filterText(config: BotConfig): string {
-  const min = config.minBuyUsd ?? 1;
-  const emoji = config.alertEmoji ?? "🟢";
-  const count = config.emojiPerTier ?? 4;
-  const t1 = config.tier1Min ?? 100;
-  const t2 = config.tier2Min ?? 500;
-  const t3 = config.tier3Min ?? 1000;
-  return [
-    `🔍 <b>Buy Alert Filters</b>`,
-    ``,
-    `Only buys of <b>$${min}+</b> will trigger an alert.`,
-    ``,
-    `<b>Tier Thresholds</b> (controls emoji count per buy size):`,
-    `${emoji.repeat(count)} Small — $${min} – $${t1}`,
-    `${emoji.repeat(count * 2)} Medium — $${t1} – $${t2}`,
-    `${emoji.repeat(count * 3)} 🐋 Whale — $${t2}+`,
-    ``,
-    `<i>Tap below to update:</i>`,
-  ].join("\n");
-}
-
 function minBuyKeyboard(): TelegramBot.InlineKeyboardMarkup {
   const amounts = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000];
   const rows: TelegramBot.InlineKeyboardButton[][] = [];
   for (let i = 0; i < amounts.length; i += 4)
     rows.push(amounts.slice(i, i + 4).map((n) => ({ text: `$${n}`, callback_data: `set:min:${n}` })));
-  rows.push([{ text: "⬅️ Back to Filters", callback_data: "cfg:filter" }]);
+  rows.push([{ text: "⬅️ Back", callback_data: "action:settings" }]);
   return { inline_keyboard: rows };
 }
 
@@ -355,23 +319,80 @@ export function startCommandBot(): void {
     { command: "start", description: "Start buy alert monitoring" },
     { command: "stop", description: "Stop monitoring" },
     { command: "status", description: "Check current status" },
-    { command: "ca", description: "Look up any token — /ca <address>" },
-    { command: "filter", description: "Set buy alert filters (min buy, tiers)" },
+    { command: "ca", description: "View group token info, or /ca <address> to look up any token" },
+    { command: "filter", description: "Admin: /filter ca <address> — set the group token CA" },
   ]).catch(() => null);
 
   bot.on("polling_error", (err) => {
     logger.error({ msg: String(err) }, "Telegram polling error");
   });
 
-  // ── /ca — public contract address lookup (any user, any chain) ───────────
+  // ── /ca — show group token or look up any address ─────────────────────────
   bot.onText(/^\/ca(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
     const chatId = String(msg.chat.id);
     const address = match?.[1]?.trim();
+
     if (!address) {
-      await bot.sendMessage(chatId,
-        `🔍 <b>Token Lookup</b>\n\nUsage: <code>/ca TOKEN_ADDRESS</code>\n\nWorks on all chains — Solana, Ethereum, BSC, Base, Polygon, Arbitrum, Avalanche, Optimism.`,
-        { parse_mode: "HTML" },
-      );
+      const config = await getOrCreate(chatId, msg.chat.title ?? undefined);
+      const saved = config.tokenAddress;
+      if (!saved) {
+        await bot.sendMessage(chatId,
+          `🔍 <b>Token Lookup</b>\n\nNo token has been set for this group yet.\n\nAdmins: use <code>/filter ca CONTRACT_ADDRESS</code> to set the token.\nAnyone: use <code>/ca CONTRACT_ADDRESS</code> to look up any token.`,
+          { parse_mode: "HTML" },
+        );
+        return;
+      }
+      const lookupMsg = await bot.sendMessage(chatId, `🔍 Fetching token info…`);
+      try {
+        const dexData = await getDexScreenerData(saved);
+        if (!dexData) {
+          await bot.editMessageText(
+            `📋 <b>Contract Address</b>\n\n<code>${saved}</code>\n\n<i>No live price data found.</i>`,
+            { chat_id: chatId, message_id: lookupMsg.message_id, parse_mode: "HTML" },
+          ).catch(() => null);
+          return;
+        }
+        const name = dexData.baseToken.name;
+        const symbol = dexData.baseToken.symbol;
+        const chain = dexData.chainId ?? "?";
+        const chainLabel = CHAIN_LABELS[chain] ?? chain;
+        const screenerUrl = dexData.url ?? `https://dexscreener.com/${chain}/${saved}`;
+        const price = dexData.priceUsd ? parseFloat(dexData.priceUsd) : null;
+        const priceStr = price === null ? "—"
+          : price < 0.000001 ? `$${price.toFixed(10)}`
+          : price < 0.001 ? `$${price.toFixed(8)}`
+          : price < 1 ? `$${price.toFixed(6)}`
+          : `$${price.toFixed(4)}`;
+        const change24h = dexData.priceChange?.h24 ?? null;
+        const changeEmoji = change24h === null ? "" : change24h >= 0 ? "📈 " : "📉 ";
+        const changeStr = change24h !== null ? `${changeEmoji}<b>${change24h >= 0 ? "+" : ""}${change24h.toFixed(1)}%</b>` : "—";
+        const mcap = dexData.marketCap ?? dexData.fdv ?? null;
+        const mcapStr = mcap !== null ? `$${Math.round(mcap).toLocaleString("en-US")}` : "—";
+        const liq = dexData.liquidity?.usd ?? null;
+        const liqStr = liq === null ? "—"
+          : liq >= 1_000_000 ? `$${(liq / 1_000_000).toFixed(2)}M`
+          : liq >= 1_000 ? `$${(liq / 1_000).toFixed(1)}K`
+          : `$${Math.round(liq)}`;
+        const text =
+          `🔍 <b>${name} [${symbol}]</b>\n` +
+          `⛓ ${chainLabel}\n\n` +
+          `💲 Price: <b>${priceStr}</b>\n` +
+          `24h: ${changeStr}\n` +
+          `💰 Market Cap: <b>${mcapStr}</b>\n` +
+          `💧 Liquidity: <b>${liqStr}</b>\n\n` +
+          `📋 Contract:\n<code>${saved}</code>\n\n` +
+          `<a href="${screenerUrl}">📈 View on DexScreener</a>`;
+        await bot.editMessageText(text, {
+          chat_id: chatId,
+          message_id: lookupMsg.message_id,
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+        }).catch(() => null);
+      } catch {
+        await bot.editMessageText(`❌ Error fetching token info.`, {
+          chat_id: chatId, message_id: lookupMsg.message_id,
+        }).catch(() => null);
+      }
       return;
     }
 
@@ -550,16 +571,31 @@ export function startCommandBot(): void {
     await processTokenAddress(chatId, address, chain, config);
   });
 
-  // ── /filter — admin filter settings (min buy, tiers) ─────────────────────
-  bot.onText(/^\/filter(@\S+)?$/, async (msg) => {
+  // ── /filter ca <address> — admin sets the group's token CA ───────────────
+  bot.onText(/^\/filter(?:@\S+)?(?:\s+(.+))?$/i, async (msg, match) => {
     if (!msg.from) return;
     const chatId = String(msg.chat.id);
     if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
-    const config = await getOrCreate(chatId, msg.chat.title);
-    await bot.sendMessage(chatId, filterText(config), {
-      parse_mode: "HTML",
-      reply_markup: filterKeyboard(config),
-    });
+    const args = (match?.[1] ?? "").trim().split(/\s+/);
+    const subCmd = args[0]?.toLowerCase();
+    const address = args[1]?.trim();
+
+    if (subCmd === "ca") {
+      if (!address) {
+        await bot.sendMessage(chatId,
+          `⚙️ <b>Set Token CA</b>\n\nUsage:\n<code>/filter ca CONTRACT_ADDRESS</code>\n\nExample:\n<code>/filter ca 7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr</code>`,
+          { parse_mode: "HTML" },
+        );
+        return;
+      }
+      const config = await getOrCreate(chatId, msg.chat.title);
+      await processTokenAddress(chatId, address, config.chain ?? "solana", config);
+    } else {
+      await bot.sendMessage(chatId,
+        `⚙️ <b>Filter Commands (admin only)</b>\n\n<code>/filter ca &lt;address&gt;</code> — Set the group token contract address\n\nUsers can then type <code>/ca</code> to view the token info.`,
+        { parse_mode: "HTML" },
+      );
+    }
   });
 
   // ── /setup ────────────────────────────────────────────────────────────────
@@ -686,30 +722,6 @@ export function startCommandBot(): void {
       return;
     }
 
-    // Filter menu
-    if (data === "cfg:filter") {
-      await bot.editMessageText(filterText(config), {
-        chat_id: chatId, message_id: msgId, parse_mode: "HTML",
-        reply_markup: filterKeyboard(config),
-      }).catch(() => null);
-      return;
-    }
-
-    // Tier thresholds
-    if (data === "cfg:tiers") {
-      pendingState.set(chatId, { step: "await_tier_thresholds" });
-      const t1 = config.tier1Min ?? 100;
-      const t2 = config.tier2Min ?? 500;
-      const t3 = config.tier3Min ?? 1000;
-      await bot.sendMessage(chatId,
-        `🏷 <b>Tier Thresholds</b>\n\nSend three numbers: <b>Tier1 Tier2 Tier3</b> (in USD)\n\n` +
-        `• Tier 1 = upper limit of Small buys\n• Tier 2 = upper limit of Medium buys\n• Tier 3 = Whale minimum\n\n` +
-        `Example: <code>500 1000 5000</code>\n\nCurrent: <b>$${t1} / $${t2} / $${t3}</b>`,
-        { parse_mode: "HTML" },
-      );
-      return;
-    }
-
     // Min buy picker
     if (data === "cfg:min") {
       await bot.editMessageText(
@@ -722,10 +734,8 @@ export function startCommandBot(): void {
       const n = parseFloat(data.split(":")[2] ?? "1");
       await db.update(botConfigTable).set({ minBuyUsd: n, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
       const updated = await getOrCreate(chatId);
-      await bot.editMessageText(filterText(updated), {
-        chat_id: chatId, message_id: msgId, parse_mode: "HTML",
-        reply_markup: filterKeyboard(updated),
-      }).catch(() => null);
+      const { running } = botRegistry.getStatus(updated.id);
+      await sendSettings(bot, chatId, updated, running, msgId);
       await bot.answerCallbackQuery(query.id, { text: `✅ Min buy set to $${n}` });
       return;
     }
@@ -1181,36 +1191,6 @@ export function startCommandBot(): void {
       const updated = await getOrCreate(chatId);
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running);
-      return;
-    }
-
-    if (state.step === "await_tier_thresholds") {
-      const rawText = (msg.text ?? "").trim();
-      const nums = rawText.split(/\s+/).map(Number);
-      if (nums.length < 3 || nums.some(isNaN) || nums.some((n) => n <= 0)) {
-        await bot.sendMessage(chatId,
-          `❌ Please send three positive USD amounts.\nExample: <code>500 1000 5000</code>`,
-          { parse_mode: "HTML" },
-        );
-        return;
-      }
-      const [t1 = 100, t2 = 500, t3 = 1000] = nums;
-      if (t1 >= t2 || t2 >= t3) {
-        await bot.sendMessage(chatId,
-          `❌ Each tier must be larger than the previous.\nExample: <code>500 1000 5000</code>`,
-          { parse_mode: "HTML" },
-        );
-        return;
-      }
-      pendingState.delete(chatId);
-      await db.update(botConfigTable)
-        .set({ tier1Min: t1, tier2Min: t2, tier3Min: t3, updatedAt: new Date() })
-        .where(eq(botConfigTable.id, config.id));
-      const updated = await getOrCreate(chatId);
-      await bot.sendMessage(chatId,
-        `✅ Tiers updated:\n• Small: $${config.minBuyUsd ?? 1} – $${t1}\n• Medium: $${t1} – $${t2}\n• 🐋 Whale: $${t2}+`,
-        { parse_mode: "HTML", reply_markup: filterKeyboard(updated) },
-      );
       return;
     }
 
