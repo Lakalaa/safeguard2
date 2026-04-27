@@ -265,28 +265,62 @@ async function getTweetMetrics(tweetId: string): Promise<{ likes: number; retwee
   }
 }
 
+// ── Shared progress bar ────────────────────────────────────────────────────────
+function progressBar(current: number, target: number, width = 12): string {
+  if (target <= 0) return "░".repeat(width);
+  const filled = Math.min(width, Math.round((current / target) * width));
+  return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
 function buildRaidMessage(
   metrics: { likes: number; retweets: number; replies: number },
   targets: { likes: number; retweets: number; replies: number },
   tweetUrl: string,
-): string {
-  function statLine(label: string, current: number, target: number): string {
+  config: BotConfig,
+): { text: string; keyboard: TelegramBot.InlineKeyboardMarkup } {
+  const name = config.tokenName ?? config.tokenSymbol ?? "Token";
+
+  function statLine(emoji: string, label: string, current: number, target: number): string {
     if (target <= 0) return "";
     const pct = Math.min(100, Math.round((current / target) * 100));
     const reached = current >= target;
-    const sq = reached ? "🟩" : "🟥";
-    const pctStr = pct >= 100 ? "💯%" : `${pct}%`;
-    return `${sq} ${label} <b>${current}</b> | ${target} [${pctStr}]`;
+    const bar = progressBar(current, target);
+    const badge = reached ? "✅" : `${pct}%`;
+    const pad = label.padEnd(8);
+    return `${emoji} ${pad} <code>${bar}</code> <b>${current}</b>/<b>${target}</b> [${badge}]`;
   }
-  const lines: string[] = [`⚡ <b>Raid Tweet</b>\n`];
-  const l = statLine("Likes", metrics.likes, targets.likes);
-  const r = statLine("Retweets", metrics.retweets, targets.retweets);
-  const rep = statLine("Replies", metrics.replies, targets.replies);
+
+  const allDone =
+    metrics.likes >= targets.likes &&
+    metrics.retweets >= targets.retweets &&
+    metrics.replies >= targets.replies;
+
+  const lines: string[] = [
+    `🚨 <b>RAID ALERT</b> 🚨`,
+    ``,
+    `📣 <b>${name}</b> needs your support — raid NOW!`,
+    ``,
+  ];
+
+  const l = statLine("❤️", "Likes", metrics.likes, targets.likes);
+  const r = statLine("🔁", "Retweets", metrics.retweets, targets.retweets);
+  const rep = statLine("💬", "Replies", metrics.replies, targets.replies);
   if (l) lines.push(l);
   if (r) lines.push(r);
   if (rep) lines.push(rep);
-  lines.push(`\n${tweetUrl}`);
-  return lines.join("\n");
+
+  lines.push(``);
+  if (allDone) {
+    lines.push(`🔥 <b>ALL TARGETS CRUSHED — LFG! 🚀</b>`);
+  } else {
+    lines.push(`⚡ <b>Push it — every engagement counts!</b>`);
+  }
+
+  const keyboard: TelegramBot.InlineKeyboardMarkup = {
+    inline_keyboard: [[{ text: "🐦 RAID THE TWEET →", url: tweetUrl }]],
+  };
+
+  return { text: lines.join("\n"), keyboard };
 }
 
 // ── Simulated vote alert ────────────────────────────────────────────────────────
@@ -294,12 +328,22 @@ function buildVoteMessage(config: BotConfig, currentCount: number): string {
   const name = config.tokenName ?? config.tokenSymbol ?? "Token";
   const pos = config.votePosition ?? 1;
   const needed = config.voteNeeded ?? 50;
+  const target = currentCount + needed;
+  const bar = progressBar(currentCount, target);
+  const pct = Math.min(100, Math.round((currentCount / target) * 100));
+
   return [
-    `🗳 <b>New Vote for ${name}!</b>`,
+    `🗳 <b>VOTE ALERT</b> 🗳`,
     ``,
-    `• Current Votes: <b>${currentCount.toLocaleString()}</b>`,
-    `• Position: <b>#${pos}</b>`,
-    `🔋 <b>Votes needed to enter Leaderboard:</b> ${needed}`,
+    `🔥 <b>${name}</b> just received a new vote!`,
+    ``,
+    `📊 Total Votes:  <b>${currentCount.toLocaleString()}</b>`,
+    `🏆 Position:     <b>#${pos}</b>`,
+    `🎯 <b>${needed}</b> more votes needed to top the leaderboard!`,
+    ``,
+    `<code>${bar}</code>  [${pct}%]`,
+    ``,
+    `⬆️ <b>Every vote counts — go vote NOW!</b>`,
   ].join("\n");
 }
 
@@ -627,10 +671,13 @@ class BotRegistry {
       retweets: config.raidTargetRetweets ?? 5,
       replies: config.raidTargetReplies ?? 5,
     };
-    const message = buildRaidMessage(metrics, targets, config.raidTweetUrl);
+    const { text, keyboard } = buildRaidMessage(metrics, targets, config.raidTweetUrl, config);
     const tgBot = new TelegramBot(token, { polling: false });
-    // disable_web_page_preview=false lets Telegram embed the tweet preview card
-    await tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML" });
+    await tgBot.sendMessage(config.chatId, text, {
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+      reply_markup: keyboard,
+    });
     logger.info({ configId, tweetId, metrics }, "Raid alert sent");
   }
 
