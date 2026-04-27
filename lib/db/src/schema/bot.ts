@@ -32,6 +32,11 @@ export const botConfigTable = pgTable("bot_config", {
   alertMediaType: text("alert_media_type"),
   alertStyle: text("alert_style").notNull().default("sosana"), // "sosana" | "trending"
   repeatInterval: integer("repeat_interval"), // seconds between periodic stat posts; null = off
+  raidTweetUrl: text("raid_tweet_url"),
+  raidTargetLikes: integer("raid_target_likes").default(10),
+  raidTargetRetweets: integer("raid_target_retweets").default(5),
+  raidTargetReplies: integer("raid_target_replies").default(5),
+  raidInterval: integer("raid_interval"), // seconds between raid updates; null = off
   telegramUrl: text("telegram_url"),
   twitterUrl: text("twitter_url"),
   websiteUrl: text("website_url"),

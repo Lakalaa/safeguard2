@@ -29,7 +29,9 @@ type PendingState =
   | { step: "await_buy_link" }
   | { step: "await_social_telegram" }
   | { step: "await_social_twitter"; telegramUrl: string | null }
-  | { step: "await_social_website"; telegramUrl: string | null; twitterUrl: string | null };
+  | { step: "await_social_website"; telegramUrl: string | null; twitterUrl: string | null }
+  | { step: "await_raid_url" }
+  | { step: "await_raid_targets"; tweetUrl: string };
 
 const pendingState = new Map<string, PendingState>();
 
@@ -97,6 +99,7 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
       ],
       [
         { text: `⏰ Repeat: ${formatInterval(config.repeatInterval)}`, callback_data: "cfg:repeat" },
+        { text: config.raidTweetUrl ? "🎯 Raid ✅" : "🎯 Raid Setup", callback_data: "cfg:raid" },
       ],
       [
         {
@@ -141,6 +144,35 @@ function repeatKeyboard(current: number | null | undefined): TelegramBot.InlineK
   }
   rows.push([{ text: "⬅️ Back", callback_data: "action:settings" }]);
   return { inline_keyboard: rows };
+}
+
+function raidIntervalKeyboard(tweetUrl: string, current: number | null | undefined): TelegramBot.InlineKeyboardMarkup {
+  const presets = [
+    { label: "Off", secs: 0 },
+    { label: "30s", secs: 30 },
+    { label: "1min", secs: 60 },
+    { label: "5min", secs: 300 },
+    { label: "10min", secs: 600 },
+    { label: "30min", secs: 1800 },
+    { label: "1hr", secs: 3600 },
+  ];
+  const cur = current ?? 0;
+  const row = presets.map((p) => ({
+    text: p.secs === cur ? `✅ ${p.label}` : p.label,
+    callback_data: `set:raid:interval:${p.secs}`,
+  }));
+  return {
+    inline_keyboard: [
+      row.slice(0, 4),
+      row.slice(4),
+      [
+        { text: "🔗 Change Tweet", callback_data: "cfg:raid:url" },
+        { text: "🎯 Set Targets", callback_data: "cfg:raid:targets" },
+      ],
+      [{ text: "🗑 Clear Raid", callback_data: "cfg:raid:clear" }],
+      [{ text: "⬅️ Back", callback_data: "action:settings" }],
+    ],
+  };
 }
 
 function styleKeyboard(current: string): TelegramBot.InlineKeyboardMarkup {
@@ -657,6 +689,84 @@ export function startCommandBot(): void {
       return;
     }
 
+    // ── Raid tracker ─────────────────────────────────────────────────────────────
+    if (data === "cfg:raid" || data === "cfg:raid:url" || data === "cfg:raid:targets" || data === "cfg:raid:clear" || data.startsWith("set:raid:interval:")) {
+      const hasBearerToken = !!process.env["TWITTER_BEARER_TOKEN"];
+      if (!hasBearerToken) {
+        await bot.answerCallbackQuery(query.id, {
+          text: "⚠️ TWITTER_BEARER_TOKEN not set. Contact admin.",
+          show_alert: true,
+        });
+        return;
+      }
+    }
+
+    if (data === "cfg:raid") {
+      if (!config.raidTweetUrl) {
+        await bot.editMessageText(
+          `🎯 <b>Raid Tracker</b>\n\nTrack live Twitter engagement and post progress updates to your group.\n\n` +
+          `No tweet configured yet. Tap <b>Set Tweet URL</b> to begin.`,
+          { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: raidIntervalKeyboard("", config.raidInterval) },
+        ).catch(() => null);
+      } else {
+        const tweetShort = config.raidTweetUrl.length > 50 ? config.raidTweetUrl.slice(0, 47) + "…" : config.raidTweetUrl;
+        await bot.editMessageText(
+          `🎯 <b>Raid Tracker</b>\n\n` +
+          `Tweet: <a href="${config.raidTweetUrl}">${tweetShort}</a>\n` +
+          `Targets: ❤️ ${config.raidTargetLikes ?? 10} | 🔁 ${config.raidTargetRetweets ?? 5} | 💬 ${config.raidTargetReplies ?? 5}\n` +
+          `Interval: ${formatInterval(config.raidInterval)}\n\n` +
+          `Pick an update interval below (or Off to pause):`,
+          { chat_id: chatId, message_id: msgId, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: raidIntervalKeyboard(config.raidTweetUrl, config.raidInterval) },
+        ).catch(() => null);
+      }
+      return;
+    }
+
+    if (data === "cfg:raid:url") {
+      pendingState.set(chatId, { step: "await_raid_url" });
+      await bot.sendMessage(chatId,
+        `🔗 <b>Set Tweet URL</b>\n\nSend the full URL of the tweet you want to raid.\nExample: <code>https://x.com/user/status/1234567890</code>`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
+    if (data === "cfg:raid:targets") {
+      if (!config.raidTweetUrl) {
+        await bot.answerCallbackQuery(query.id, { text: "Set a tweet URL first.", show_alert: true });
+        return;
+      }
+      pendingState.set(chatId, { step: "await_raid_targets", tweetUrl: config.raidTweetUrl });
+      await bot.sendMessage(chatId,
+        `🎯 <b>Set Targets</b>\n\nSend three numbers: <b>Likes Retweets Replies</b>\nExample: <code>50 20 10</code>\n\nCurrent: ❤️ ${config.raidTargetLikes ?? 10} | 🔁 ${config.raidTargetRetweets ?? 5} | 💬 ${config.raidTargetReplies ?? 5}`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
+    if (data === "cfg:raid:clear") {
+      await db.update(botConfigTable).set({ raidTweetUrl: null, raidInterval: null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      botRegistry.restartRaidTimer(config.id, null);
+      const updated = await getOrCreate(chatId);
+      const { running } = botRegistry.getStatus(updated.id);
+      await sendSettings(bot, chatId, updated, running, msgId);
+      await bot.answerCallbackQuery(query.id, { text: "🗑 Raid cleared" });
+      return;
+    }
+
+    if (data.startsWith("set:raid:interval:")) {
+      const secs = parseInt(data.split(":")[3] ?? "0");
+      const interval = secs > 0 ? secs : null;
+      await db.update(botConfigTable).set({ raidInterval: interval, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      botRegistry.restartRaidTimer(config.id, interval);
+      const updated = await getOrCreate(chatId);
+      const { running } = botRegistry.getStatus(updated.id);
+      await sendSettings(bot, chatId, updated, running, msgId);
+      const label = secs === 0 ? "disabled" : formatInterval(secs);
+      await bot.answerCallbackQuery(query.id, { text: `🎯 Raid: ${label}` });
+      return;
+    }
+
     // Social links flow
     if (data === "cfg:social") {
       pendingState.set(chatId, { step: "await_social_telegram" });
@@ -859,6 +969,57 @@ export function startCommandBot(): void {
       );
       const updated = await getOrCreate(chatId);
       const { running } = botRegistry.getStatus(updated.id);
+      await sendSettings(bot, chatId, updated, running);
+      return;
+    }
+
+    if (state.step === "await_raid_url") {
+      pendingState.delete(chatId);
+      const tweetUrl = text.trim();
+      const tweetId = tweetUrl.match(/\/status\/(\d+)/)?.[1];
+      if (!tweetId) {
+        await bot.sendMessage(chatId,
+          `❌ Invalid tweet URL. It must contain <code>/status/</code> followed by the tweet ID.\nExample: <code>https://x.com/user/status/1234567890</code>`,
+          { parse_mode: "HTML" },
+        );
+        return;
+      }
+      await db.update(botConfigTable).set({ raidTweetUrl: tweetUrl, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      pendingState.set(chatId, { step: "await_raid_targets", tweetUrl });
+      await bot.sendMessage(chatId,
+        `✅ Tweet URL saved!\n\n🎯 <b>Set Targets</b>\nSend three numbers: <b>Likes Retweets Replies</b>\nExample: <code>50 20 10</code>\n\nOr send <code>skip</code> to use defaults (10 likes, 5 retweets, 5 replies)`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
+    if (state.step === "await_raid_targets") {
+      pendingState.delete(chatId);
+      let likes = 10, retweets = 5, replies = 5;
+      if (text.trim().toLowerCase() !== "skip") {
+        const nums = text.trim().split(/\s+/).map(Number);
+        if (nums.length < 3 || nums.some(isNaN)) {
+          await bot.sendMessage(chatId,
+            `❌ Please send three numbers separated by spaces.\nExample: <code>50 20 10</code>\nOr send <code>skip</code> to use defaults.`,
+            { parse_mode: "HTML" },
+          );
+          pendingState.set(chatId, state); // restore state
+          return;
+        }
+        [likes = 10, retweets = 5, replies = 5] = nums;
+      }
+      await db.update(botConfigTable).set({
+        raidTargetLikes: likes,
+        raidTargetRetweets: retweets,
+        raidTargetReplies: replies,
+        updatedAt: new Date(),
+      }).where(eq(botConfigTable.id, config.id));
+      const updated = await getOrCreate(chatId);
+      const { running } = botRegistry.getStatus(updated.id);
+      await bot.sendMessage(chatId,
+        `✅ Targets saved: ❤️ ${likes} | 🔁 ${retweets} | 💬 ${replies}\n\nNow set the update interval in settings:`,
+        { parse_mode: "HTML" },
+      );
       await sendSettings(bot, chatId, updated, running);
       return;
     }

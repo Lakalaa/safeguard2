@@ -4,6 +4,8 @@
 
 Multi-tenant crypto buy alert bot dashboard. Each configured bot monitors a different token on any chain (Solana, Ethereum, BSC, Base, Arbitrum, Polygon, Avalanche, Optimism), posts formatted buy alerts to its own Telegram group. Zero simulated data — all monitoring is live on-chain.
 
+Features: Two alert styles (SOSANA/Trending), real DexScreener trending rank, repeat post timer (live stats), /ca public lookup, Twitter Raid tracker (tracks live tweet engagement vs targets, posts progress updates with tweet preview embed).
+
 ## Stack
 
 - **Monorepo tool**: pnpm workspaces

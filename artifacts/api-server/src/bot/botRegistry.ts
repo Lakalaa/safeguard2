@@ -229,6 +229,50 @@ interface BotInstance {
   monitor: SolanaMonitor | EvmMonitor | null;
   dexCache: { data: DexScreenerPair | null; fetchedAt: number };
   repeatTimer: ReturnType<typeof setInterval> | null;
+  raidTimer: ReturnType<typeof setInterval> | null;
+}
+
+// ── Twitter raid tracker ────────────────────────────────────────────────────────
+async function getTweetMetrics(tweetId: string): Promise<{ likes: number; retweets: number; replies: number } | null> {
+  const token = process.env["TWITTER_BEARER_TOKEN"];
+  if (!token) return null;
+  try {
+    const res = await fetch(
+      `https://api.twitter.com/2/tweets/${tweetId}?tweet.fields=public_metrics`,
+      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) },
+    );
+    if (!res.ok) return null;
+    const data = await res.json() as {
+      data?: { public_metrics?: { like_count: number; retweet_count: number; reply_count: number } };
+    };
+    const m = data.data?.public_metrics;
+    if (!m) return null;
+    return { likes: m.like_count, retweets: m.retweet_count, replies: m.reply_count };
+  } catch { return null; }
+}
+
+function buildRaidMessage(
+  metrics: { likes: number; retweets: number; replies: number },
+  targets: { likes: number; retweets: number; replies: number },
+  tweetUrl: string,
+): string {
+  function statLine(label: string, current: number, target: number): string {
+    if (target <= 0) return "";
+    const pct = Math.min(100, Math.round((current / target) * 100));
+    const reached = current >= target;
+    const sq = reached ? "🟩" : "🟥";
+    const pctStr = pct >= 100 ? "💯%" : `${pct}%`;
+    return `${sq} ${label} <b>${current}</b> | ${target} [${pctStr}]`;
+  }
+  const lines: string[] = [`⚡ <b>Raid Tweet</b>\n`];
+  const l = statLine("Likes", metrics.likes, targets.likes);
+  const r = statLine("Retweets", metrics.retweets, targets.retweets);
+  const rep = statLine("Replies", metrics.replies, targets.replies);
+  if (l) lines.push(l);
+  if (r) lines.push(r);
+  if (rep) lines.push(rep);
+  lines.push(`\n${tweetUrl}`);
+  return lines.join("\n");
 }
 
 // ── Periodic repeat post (real live data, not a fake buy) ──────────────────────
@@ -314,6 +358,7 @@ class BotRegistry {
       monitor: null,
       dexCache: { data: null, fetchedAt: 0 },
       repeatTimer: null,
+      raidTimer: null,
     };
 
     try {
@@ -364,6 +409,16 @@ class BotRegistry {
         logger.info({ configId, intervalSecs: config.repeatInterval }, "Repeat timer started");
       }
 
+      // Start raid timer if configured
+      if (config.raidTweetUrl && config.raidInterval && config.raidInterval > 0) {
+        inst.raidTimer = setInterval(() => {
+          this.sendRaidAlert(configId).catch((err) =>
+            logger.error({ err, configId }, "Raid alert error"),
+          );
+        }, config.raidInterval * 1000);
+        logger.info({ configId, intervalSecs: config.raidInterval }, "Raid timer started");
+      }
+
       logger.info({ configId, token: config.tokenAddress, chain: chainId }, "Bot started");
       return { running: true };
     } catch (err) {
@@ -378,10 +433,8 @@ class BotRegistry {
   async stop(configId: number): Promise<void> {
     const inst = this.instances.get(configId);
     if (!inst) return;
-    if (inst.repeatTimer) {
-      clearInterval(inst.repeatTimer);
-      inst.repeatTimer = null;
-    }
+    if (inst.repeatTimer) { clearInterval(inst.repeatTimer); inst.repeatTimer = null; }
+    if (inst.raidTimer) { clearInterval(inst.raidTimer); inst.raidTimer = null; }
     if (inst.monitor) {
       await inst.monitor.stop();
       inst.monitor = null;
@@ -415,6 +468,47 @@ class BotRegistry {
       logger.info({ configId, intervalSecs: secs }, "Repeat timer updated");
     }
     this.instances.set(configId, inst);
+  }
+
+  /** Update raid timer live — called when admin changes url/interval */
+  restartRaidTimer(configId: number, intervalSecs: number | null): void {
+    const inst = this.instances.get(configId);
+    if (!inst) return;
+    if (inst.raidTimer) { clearInterval(inst.raidTimer); inst.raidTimer = null; }
+    const secs = intervalSecs ?? 0;
+    if (secs > 0 && inst.running) {
+      inst.raidTimer = setInterval(() => {
+        this.sendRaidAlert(configId).catch((err) =>
+          logger.error({ err, configId }, "Raid alert error"),
+        );
+      }, secs * 1000);
+      logger.info({ configId, intervalSecs: secs }, "Raid timer updated");
+    }
+    this.instances.set(configId, inst);
+  }
+
+  private async sendRaidAlert(configId: number): Promise<void> {
+    const [config] = await db
+      .select().from(botConfigTable).where(eq(botConfigTable.id, configId)).limit(1);
+    const token = resolveToken(config);
+    if (!token || !config?.chatId || !config.raidTweetUrl) return;
+
+    const tweetId = config.raidTweetUrl.match(/\/status\/(\d+)/)?.[1];
+    if (!tweetId) return;
+
+    const metrics = await getTweetMetrics(tweetId);
+    if (!metrics) return;
+
+    const targets = {
+      likes: config.raidTargetLikes ?? 10,
+      retweets: config.raidTargetRetweets ?? 5,
+      replies: config.raidTargetReplies ?? 5,
+    };
+    const message = buildRaidMessage(metrics, targets, config.raidTweetUrl);
+    const tgBot = new TelegramBot(token, { polling: false });
+    // disable_web_page_preview=false lets Telegram embed the tweet preview card
+    await tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML" });
+    logger.info({ configId, tweetId, metrics }, "Raid alert sent");
   }
 
   private async sendRepeatAlert(configId: number): Promise<void> {
