@@ -319,6 +319,8 @@ export function startCommandBot(): void {
     { command: "start", description: "Start buy alert monitoring" },
     { command: "stop", description: "Stop monitoring" },
     { command: "status", description: "Check current status" },
+    { command: "ca", description: "Show token contract address" },
+    { command: "website", description: "Show project website" },
   ]).catch(() => null);
 
   bot.on("polling_error", (err) => {
@@ -380,6 +382,55 @@ export function startCommandBot(): void {
     }
   });
 
+
+  // ── /ca — show contract address + buttons ─────────────────────────────────
+  bot.onText(/^\/ca(?:@\w+)?$/i, async (msg) => {
+    const chatId = String(msg.chat.id);
+    const config = await getOrCreate(chatId);
+    const addr = config.tokenAddress;
+    const name = config.tokenName ?? config.tokenSymbol ?? "Token";
+    const symbol = config.tokenSymbol ?? "";
+
+    if (!addr) {
+      await bot.sendMessage(chatId, `❌ No token configured yet. Use /add to set one.`);
+      return;
+    }
+
+    const buttons: TelegramBot.InlineKeyboardButton[] = [];
+    if (config.dextUrl) buttons.push({ text: "📊 DexTools", url: config.dextUrl });
+    if (config.screenerUrl) buttons.push({ text: "📈 DexScreener", url: config.screenerUrl });
+    if (config.buyUrl) buttons.push({ text: "🛒 Buy", url: config.buyUrl });
+
+    const text = `📋 <b>${name}${symbol && symbol !== name ? ` [${symbol}]` : ""} — Contract Address</b>\n\n<code>${addr}</code>`;
+    await bot.sendMessage(chatId, text, {
+      parse_mode: "HTML",
+      ...(buttons.length > 0 ? { reply_markup: { inline_keyboard: [buttons] } } : {}),
+    });
+  });
+
+  // ── /website — show project website ───────────────────────────────────────
+  bot.onText(/^\/website(?:@\w+)?$/i, async (msg) => {
+    const chatId = String(msg.chat.id);
+    const config = await getOrCreate(chatId);
+    const name = config.tokenName ?? config.tokenSymbol ?? "Token";
+
+    if (!config.websiteUrl) {
+      await bot.sendMessage(chatId, `❌ No website configured. An admin can set it via /setup → Links.`);
+      return;
+    }
+
+    const buttons: TelegramBot.InlineKeyboardButton[] = [
+      { text: "🌐 Visit Website", url: config.websiteUrl },
+    ];
+    if (config.telegramUrl) buttons.push({ text: "💬 Telegram", url: config.telegramUrl });
+    if (config.twitterUrl) buttons.push({ text: "🐦 X / Twitter", url: config.twitterUrl });
+
+    const text = `🌐 <b>${name} — Official Links</b>`;
+    await bot.sendMessage(chatId, text, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: [buttons] },
+    });
+  });
 
   // ── Shared: process a token address lookup + save ─────────────────────────
   async function processTokenAddress(
