@@ -739,22 +739,44 @@ class BotRegistry {
     const tweetId = config.raidTweetUrl.match(/\/status\/(\d+)/)?.[1];
     if (!tweetId) return;
 
-    const metrics = await getTweetMetrics(tweetId);
-    if (!metrics) return;
-
     const targets = {
       likes: config.raidTargetLikes ?? 10,
       retweets: config.raidTargetRetweets ?? 5,
       replies: config.raidTargetReplies ?? 5,
     };
-    const { text, keyboard } = buildRaidMessage(metrics, targets, config.raidTweetUrl, config);
+
+    // Try to get live metrics — post regardless of whether it succeeds
+    const metrics = await getTweetMetrics(tweetId);
+
+    const name = config.tokenName ?? config.tokenSymbol ?? "Token";
+    const keyboard: TelegramBot.InlineKeyboardMarkup = {
+      inline_keyboard: [[{ text: "🐦 RAID THE TWEET →", url: config.raidTweetUrl }]],
+    };
+
+    let text: string;
+    if (metrics) {
+      const { text: built } = buildRaidMessage(metrics, targets, config.raidTweetUrl, config);
+      text = built;
+    } else {
+      // Twitter API unavailable — post a static call-to-action
+      text = [
+        `🚨 <b>RAID ALERT</b> 🚨`,
+        ``,
+        `📣 <b>${name}</b> needs your support — raid NOW!`,
+        ``,
+        `❤️ Like  •  🔁 Retweet  •  💬 Reply`,
+        ``,
+        `⚡ <b>Every engagement counts — go push the tweet!</b>`,
+      ].join("\n");
+    }
+
     const tgBot = new TelegramBot(token, { polling: false });
     await tgBot.sendMessage(config.chatId, text, {
       parse_mode: "HTML",
       disable_web_page_preview: true,
       reply_markup: keyboard,
     });
-    logger.info({ configId, tweetId, metrics }, "Raid alert sent");
+    logger.info({ configId, tweetId, hasMetrics: !!metrics }, "Raid alert sent");
   }
 
   private async sendRepeatAlert(configId: number): Promise<void> {
