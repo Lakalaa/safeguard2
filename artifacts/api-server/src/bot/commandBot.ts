@@ -568,21 +568,32 @@ export function startCommandBot(): void {
     }
   }
 
-  // ── Bot added to group ────────────────────────────────────────────────────
+  // ── Join / invite / leave — auto-delete service messages ─────────────────
   bot.on("new_chat_members", async (msg) => {
     try {
-      const me = await bot.getMe();
-      if (!(msg.new_chat_members ?? []).some((m) => m.id === me.id)) return;
       const chatId = String(msg.chat.id);
-      await getOrCreate(chatId, msg.chat.title);
-      await bot.sendMessage(chatId,
-        `🛠 <b>Click button below to add your token for buy bot</b>`,
-        {
-          parse_mode: "HTML",
-          reply_markup: { inline_keyboard: [[{ text: "➡️ Add Token", callback_data: "action:add_token" }]] },
-        },
-      );
+      // Always silently delete the join/invite service message
+      await bot.deleteMessage(chatId, msg.message_id).catch(() => null);
+
+      // If the bot itself was just added → send setup prompt
+      const me = await bot.getMe();
+      if ((msg.new_chat_members ?? []).some((m) => m.id === me.id)) {
+        await getOrCreate(chatId, msg.chat.title);
+        await bot.sendMessage(chatId,
+          `🛠 <b>Click button below to add your token for buy bot</b>`,
+          {
+            parse_mode: "HTML",
+            reply_markup: { inline_keyboard: [[{ text: "➡️ Add Token", callback_data: "action:add_token" }]] },
+          },
+        );
+      }
     } catch (err) { logger.error({ err }, "new_chat_members error"); }
+  });
+
+  bot.on("left_chat_member", async (msg) => {
+    try {
+      await bot.deleteMessage(String(msg.chat.id), msg.message_id).catch(() => null);
+    } catch { /* ignore */ }
   });
 
   // ── /add ──────────────────────────────────────────────────────────────────
