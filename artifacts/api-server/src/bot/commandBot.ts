@@ -188,7 +188,6 @@ function raidIntervalKeyboard(tweetUrl: string, current: number | null | undefin
         { text: "🎯 Set Targets", callback_data: "cfg:raid:targets" },
       ],
       [{ text: "🗑 Clear Raid", callback_data: "cfg:raid:clear" }],
-      [{ text: "⬅️ Back", callback_data: "action:settings" }],
     ],
   };
 }
@@ -256,9 +255,71 @@ function voteMenuKeyboard(config: BotConfig): TelegramBot.InlineKeyboardMarkup {
         { text: config.voteImageFileId ? "🗑 Clear Image" : "── No Image ──", callback_data: "cfg:vote:clearimage" },
         { text: "🗑 Reset Votes to 0", callback_data: "cfg:vote:reset" },
       ],
-      [{ text: "⬅️ Back", callback_data: "action:settings" }],
     ],
   };
+}
+
+// ── Standalone raid / vote menu senders ───────────────────────────────────────
+async function sendRaidMenu(
+  bot: TelegramBot, chatId: string, config: BotConfig, msgId?: number,
+): Promise<void> {
+  const keyboard = raidIntervalKeyboard(config.raidTweetUrl ?? "", config.raidInterval);
+  let text: string;
+  if (!config.raidTweetUrl) {
+    text =
+      `🎯 <b>Raid Tracker</b>\n\n` +
+      `Track live Twitter engagement and post progress updates to your group.\n\n` +
+      `No tweet configured yet. Tap <b>Set Tweet URL</b> to begin.`;
+  } else {
+    const tweetShort = config.raidTweetUrl.length > 50
+      ? config.raidTweetUrl.slice(0, 47) + "…" : config.raidTweetUrl;
+    text =
+      `🎯 <b>Raid Tracker</b>\n\n` +
+      `Tweet: <a href="${config.raidTweetUrl}">${tweetShort}</a>\n` +
+      `Targets: ❤️ ${config.raidTargetLikes ?? 10} | 🔁 ${config.raidTargetRetweets ?? 5} | 💬 ${config.raidTargetReplies ?? 5}\n` +
+      `Interval: ${formatInterval(config.raidInterval)}\n\n` +
+      `Pick an update interval below (or Off to pause):`;
+  }
+  if (msgId) {
+    await bot.editMessageText(text, {
+      chat_id: chatId, message_id: msgId, parse_mode: "HTML",
+      disable_web_page_preview: true, reply_markup: keyboard,
+    }).catch(() => null);
+  } else {
+    await bot.sendMessage(chatId, text, {
+      parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard,
+    }).catch(() => null);
+  }
+}
+
+async function sendVoteMenu(
+  bot: TelegramBot, chatId: string, config: BotConfig, msgId?: number,
+): Promise<void> {
+  const cur = config.voteInterval ?? 0;
+  const pos = config.votePosition ?? 1;
+  const needed = config.voteNeeded ?? 50;
+  const count = config.voteCount ?? 1000;
+  const incr = config.voteIncrement ?? 10;
+  const btnCount = (() => {
+    try { return config.voteButtons ? (JSON.parse(config.voteButtons) as unknown[]).length : 0; } catch { return 0; }
+  })();
+  const text =
+    `🗳 <b>Vote Alert</b>\n\n` +
+    `Current Votes: <b>${count.toLocaleString()}</b> (+${incr} per post)\n` +
+    `Position: <b>#${pos}</b> | Needed: <b>${needed}</b>\n` +
+    `Image: ${config.voteImageFileId ? "✅" : "❌"}  Buttons: ${btnCount}\n` +
+    `Interval: <b>${formatInterval(cur)}</b>\n\n` +
+    `Pick an interval (or Off to pause), then configure the rest below:`;
+  if (msgId) {
+    await bot.editMessageText(text, {
+      chat_id: chatId, message_id: msgId, parse_mode: "HTML",
+      reply_markup: voteMenuKeyboard(config),
+    }).catch(() => null);
+  } else {
+    await bot.sendMessage(chatId, text, {
+      parse_mode: "HTML", reply_markup: voteMenuKeyboard(config),
+    }).catch(() => null);
+  }
 }
 
 function styleKeyboard(current: string): TelegramBot.InlineKeyboardMarkup {
@@ -352,10 +413,12 @@ export function createCommandBot(token: string): TelegramBot {
   bot.setMyCommands([
     { command: "add", description: "Add / change monitored token" },
     { command: "token", description: "Set token address directly" },
-    { command: "setup", description: "Open settings panel" },
+    { command: "setup", description: "Open buy-alert settings panel" },
     { command: "start", description: "Start buy alert monitoring" },
     { command: "stop", description: "Stop monitoring" },
     { command: "status", description: "Check current status" },
+    { command: "raid", description: "Open Raid Tracker setup" },
+    { command: "vote", description: "Open Vote Alert setup" },
     { command: "filter", description: "Admin: create/manage custom commands" },
   ]).catch(() => null);
 
@@ -675,6 +738,24 @@ export function createCommandBot(token: string): TelegramBot {
     await bot.sendMessage(chatId, "⏹ Monitoring stopped.");
   });
 
+  // ── /raid ─────────────────────────────────────────────────────────────────
+  bot.onText(/^\/raid(@\S+)?$/, async (msg) => {
+    if (!msg.from) return;
+    const chatId = String(msg.chat.id);
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    const config = await getOrCreate(chatId, msg.chat.title);
+    await sendRaidMenu(bot, chatId, config);
+  });
+
+  // ── /vote ─────────────────────────────────────────────────────────────────
+  bot.onText(/^\/vote(@\S+)?$/, async (msg) => {
+    if (!msg.from) return;
+    const chatId = String(msg.chat.id);
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    const config = await getOrCreate(chatId, msg.chat.title);
+    await sendVoteMenu(bot, chatId, config);
+  });
+
   // ── /status ───────────────────────────────────────────────────────────────
   bot.onText(/^\/status(@\S+)?$/, async (msg) => {
     if (!msg.from) return;
@@ -890,23 +971,7 @@ export function createCommandBot(token: string): TelegramBot {
     }
 
     if (data === "cfg:raid") {
-      if (!config.raidTweetUrl) {
-        await bot.editMessageText(
-          `🎯 <b>Raid Tracker</b>\n\nTrack live Twitter engagement and post progress updates to your group.\n\n` +
-          `No tweet configured yet. Tap <b>Set Tweet URL</b> to begin.`,
-          { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: raidIntervalKeyboard("", config.raidInterval) },
-        ).catch(() => null);
-      } else {
-        const tweetShort = config.raidTweetUrl.length > 50 ? config.raidTweetUrl.slice(0, 47) + "…" : config.raidTweetUrl;
-        await bot.editMessageText(
-          `🎯 <b>Raid Tracker</b>\n\n` +
-          `Tweet: <a href="${config.raidTweetUrl}">${tweetShort}</a>\n` +
-          `Targets: ❤️ ${config.raidTargetLikes ?? 10} | 🔁 ${config.raidTargetRetweets ?? 5} | 💬 ${config.raidTargetReplies ?? 5}\n` +
-          `Interval: ${formatInterval(config.raidInterval)}\n\n` +
-          `Pick an update interval below (or Off to pause):`,
-          { chat_id: chatId, message_id: msgId, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: raidIntervalKeyboard(config.raidTweetUrl, config.raidInterval) },
-        ).catch(() => null);
-      }
+      await sendRaidMenu(bot, chatId, config, msgId);
       return;
     }
 
@@ -936,8 +1001,7 @@ export function createCommandBot(token: string): TelegramBot {
       await db.update(botConfigTable).set({ raidTweetUrl: null, raidInterval: null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
       botRegistry.restartRaidTimer(config.id, null);
       const updated = await getOrCreate(chatId);
-      const { running } = botRegistry.getStatus(updated.id);
-      await sendSettings(bot, chatId, updated, running, msgId);
+      await sendRaidMenu(bot, chatId, updated, msgId);
       await bot.answerCallbackQuery(query.id, { text: "🗑 Raid cleared" });
       return;
     }
@@ -948,8 +1012,7 @@ export function createCommandBot(token: string): TelegramBot {
       await db.update(botConfigTable).set({ raidInterval: interval, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
       botRegistry.restartRaidTimer(config.id, interval);
       const updated = await getOrCreate(chatId);
-      const { running } = botRegistry.getStatus(updated.id);
-      await sendSettings(bot, chatId, updated, running, msgId);
+      await sendRaidMenu(bot, chatId, updated, msgId);
       const label = secs === 0 ? "disabled" : formatInterval(secs);
       await bot.answerCallbackQuery(query.id, { text: `🎯 Raid: ${label}` });
       return;
@@ -957,23 +1020,7 @@ export function createCommandBot(token: string): TelegramBot {
 
     // ── Vote alert ───────────────────────────────────────────────────────────────
     if (data === "cfg:vote") {
-      const cur = config.voteInterval ?? 0;
-      const pos = config.votePosition ?? 1;
-      const needed = config.voteNeeded ?? 50;
-      const count = config.voteCount ?? 1000;
-      const incr = config.voteIncrement ?? 10;
-      const btnCount = (() => {
-        try { return config.voteButtons ? (JSON.parse(config.voteButtons) as unknown[]).length : 0; } catch { return 0; }
-      })();
-      await bot.editMessageText(
-        `🗳 <b>Vote Alert</b>\n\n` +
-        `Current Votes: <b>${count.toLocaleString()}</b> (+${incr} per post)\n` +
-        `Position: <b>#${pos}</b> | Needed: <b>${needed}</b>\n` +
-        `Image: ${config.voteImageFileId ? "✅" : "❌"}  Buttons: ${btnCount}\n` +
-        `Interval: <b>${formatInterval(cur)}</b>\n\n` +
-        `Pick an interval (or Off to pause), then configure the rest below:`,
-        { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: voteMenuKeyboard(config) },
-      ).catch(() => null);
+      await sendVoteMenu(bot, chatId, config, msgId);
       return;
     }
 
@@ -983,8 +1030,7 @@ export function createCommandBot(token: string): TelegramBot {
       await db.update(botConfigTable).set({ voteInterval: interval, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
       botRegistry.restartVoteTimer(config.id, interval);
       const updated = await getOrCreate(chatId);
-      const { running } = botRegistry.getStatus(updated.id);
-      await sendSettings(bot, chatId, updated, running, msgId);
+      await sendVoteMenu(bot, chatId, updated, msgId);
       await bot.answerCallbackQuery(query.id, { text: `🗳 Vote: ${secs === 0 ? "Off" : formatInterval(secs)}` });
       return;
     }
