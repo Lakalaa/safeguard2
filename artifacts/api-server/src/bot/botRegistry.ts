@@ -232,6 +232,7 @@ interface BotInstance {
   raidTimer: ReturnType<typeof setInterval> | null;
   voteTimer: ReturnType<typeof setInterval> | null;
   broadcastTimer: ReturnType<typeof setInterval> | null;
+  coBotInstance: TelegramBot | null;
 }
 
 // ── Twitter raid tracker ────────────────────────────────────────────────────────
@@ -463,6 +464,7 @@ class BotRegistry {
       raidTimer: null,
       voteTimer: null,
       broadcastTimer: null,
+      coBotInstance: null,
     };
 
     try {
@@ -543,6 +545,17 @@ class BotRegistry {
         logger.info({ configId, intervalSecs: config.broadcastInterval }, "Broadcast timer started");
       }
 
+      // Start co-bot (command sharing) if configured
+      if (config.coBotToken) {
+        try {
+          const { createCommandBot } = await import("./commandBot");
+          inst.coBotInstance = createCommandBot(config.coBotToken);
+          logger.info({ configId }, "Co-bot started");
+        } catch (err) {
+          logger.warn({ err: String(err), configId }, "Co-bot failed to start — continuing without it");
+        }
+      }
+
       logger.info({ configId, token: config.tokenAddress, chain: chainId }, "Bot started");
       return { running: true };
     } catch (err) {
@@ -561,6 +574,10 @@ class BotRegistry {
     if (inst.raidTimer) { clearInterval(inst.raidTimer); inst.raidTimer = null; }
     if (inst.voteTimer) { clearInterval(inst.voteTimer); inst.voteTimer = null; }
     if (inst.broadcastTimer) { clearInterval(inst.broadcastTimer); inst.broadcastTimer = null; }
+    if (inst.coBotInstance) {
+      inst.coBotInstance.stopPolling().catch(() => null);
+      inst.coBotInstance = null;
+    }
     if (inst.monitor) {
       await inst.monitor.stop();
       inst.monitor = null;
@@ -578,7 +595,7 @@ class BotRegistry {
   restartRepeatTimer(configId: number, intervalSecs: number | null): void {
     let inst = this.instances.get(configId);
     if (!inst) {
-      inst = { chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null, broadcastTimer: null };
+      inst = { configId, chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null, broadcastTimer: null, coBotInstance: null };
       this.instances.set(configId, inst);
     }
 
@@ -603,7 +620,7 @@ class BotRegistry {
   restartRaidTimer(configId: number, intervalSecs: number | null): void {
     let inst = this.instances.get(configId);
     if (!inst) {
-      inst = { chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null, broadcastTimer: null };
+      inst = { configId, chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null, broadcastTimer: null, coBotInstance: null };
       this.instances.set(configId, inst);
     }
     if (inst.raidTimer) { clearInterval(inst.raidTimer); inst.raidTimer = null; }
@@ -623,7 +640,7 @@ class BotRegistry {
   restartVoteTimer(configId: number, intervalSecs: number | null): void {
     let inst = this.instances.get(configId);
     if (!inst) {
-      inst = { chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null, broadcastTimer: null };
+      inst = { configId, chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null, broadcastTimer: null, coBotInstance: null };
       this.instances.set(configId, inst);
     }
     if (inst.voteTimer) { clearInterval(inst.voteTimer); inst.voteTimer = null; }
@@ -643,7 +660,7 @@ class BotRegistry {
   restartBroadcastTimer(configId: number, intervalSecs: number | null): void {
     let inst = this.instances.get(configId);
     if (!inst) {
-      inst = { chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null, broadcastTimer: null };
+      inst = { configId, chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null, broadcastTimer: null, coBotInstance: null };
       this.instances.set(configId, inst);
     }
     if (inst.broadcastTimer) { clearInterval(inst.broadcastTimer); inst.broadcastTimer = null; }
@@ -655,6 +672,36 @@ class BotRegistry {
         );
       }, secs * 1000);
       logger.info({ configId, intervalSecs: secs }, "Broadcast timer updated");
+    }
+    this.instances.set(configId, inst);
+  }
+
+  /** Start or stop the co-bot for command sharing — takes effect immediately */
+  restartCoBot(configId: number, token: string | null): void {
+    let inst = this.instances.get(configId);
+    if (!inst) {
+      inst = { configId, chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null, broadcastTimer: null, coBotInstance: null };
+      this.instances.set(configId, inst);
+    }
+
+    // Stop existing co-bot if running
+    if (inst.coBotInstance) {
+      inst.coBotInstance.stopPolling().catch(() => null);
+      inst.coBotInstance = null;
+    }
+
+    // Start new co-bot if token provided
+    if (token) {
+      import("./commandBot").then(({ createCommandBot }) => {
+        try {
+          inst!.coBotInstance = createCommandBot(token);
+          logger.info({ configId }, "Co-bot (re)started");
+        } catch (err) {
+          logger.warn({ err: String(err), configId }, "Co-bot failed to start");
+        }
+        this.instances.set(configId, inst!);
+      }).catch(() => null);
+      return; // return early; instances.set happens inside the promise
     }
     this.instances.set(configId, inst);
   }

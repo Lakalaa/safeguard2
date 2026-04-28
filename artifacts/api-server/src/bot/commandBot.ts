@@ -1663,4 +1663,15 @@ export function createCommandBot(token: string): TelegramBot {
   });
 
   logger.info("Command bot started");
+  return bot;
+}
+
+/** Called at app startup — uses the global TELEGRAM_BOT_TOKEN env var */
+export function startCommandBot(): void {
+  const token = process.env["TELEGRAM_BOT_TOKEN"];
+  if (!token) {
+    logger.warn("TELEGRAM_BOT_TOKEN not set — command bot disabled");
+    return;
+  }
+  createCommandBot(token);
 }

@@ -1,6 +1,12 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 
+// Prevent Telegram 403/network errors (unhandled promise rejections) from
+// crashing the process — log them and keep running.
+process.on("unhandledRejection", (reason) => {
+  logger.warn({ reason: String(reason) }, "Unhandled promise rejection — continuing");
+});
+
 const rawPort = process.env["PORT"];
 
 if (!rawPort) {
