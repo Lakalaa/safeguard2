@@ -40,7 +40,8 @@ type PendingState =
   | { step: "await_utility_token" }
   | { step: "await_broadcast_text" }
   | { step: "await_broadcast_image" }
-  | { step: "await_broadcast_buttons" };
+  | { step: "await_broadcast_buttons" }
+  | { step: "await_co_bot_token" };
 
 const pendingState = new Map<string, PendingState>();
 
@@ -116,6 +117,7 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
       ],
       [
         { text: config.broadcastInterval ? "📢 Broadcast ✅" : "📢 Broadcast", callback_data: "cfg:broadcast" },
+        { text: config.coBotToken ? "🤝 Co-Bot ✅" : "🤝 Co-Bot", callback_data: "cfg:cobot" },
       ],
       [
         {
@@ -327,18 +329,12 @@ async function sendSettings(
   }
 }
 
-// ── Main bot startup ──────────────────────────────────────────────────────────
-export function startCommandBot(): void {
-  const token = process.env["TELEGRAM_BOT_TOKEN"];
-  if (!token) {
-    logger.warn("TELEGRAM_BOT_TOKEN not set — command bot disabled");
-    return;
-  }
-
+// ── Bot factory — can be called for main bot or any co-bot ───────────────────
+export function createCommandBot(token: string): TelegramBot {
   // Init without polling first so we can clear any stale webhook
   const bot = new TelegramBot(token, { polling: false });
 
-  // Clear any stale webhook via direct Telegram API call, then start polling
+  // Clear any stale webhook, then start polling
   fetch(`https://api.telegram.org/bot${token}/deleteWebhook?drop_pending_updates=false`)
     .then((r) => r.json())
     .then((body) => {
@@ -1130,6 +1126,24 @@ export function startCommandBot(): void {
       return;
     }
 
+    // Co-bot token (shares all commands in the group)
+    if (data === "cfg:cobot") {
+      const current = config.coBotToken;
+      pendingState.set(chatId, { step: "await_co_bot_token" });
+      await bot.sendMessage(chatId,
+        `🤝 <b>Co-Bot Setup</b>\n\n` +
+        `A co-bot shares all commands (<code>/setup</code>, <code>/filter</code>, etc.) in your group from a <b>second bot account</b>. Members can interact with either bot — both respond identically.\n\n` +
+        (current ? `Current: <code>${current.slice(0, 10)}…</code> ✅\n\n` : ``) +
+        `<b>Steps:</b>\n` +
+        `1. Open @BotFather → /newbot\n` +
+        `2. Name it (e.g. HORNY Commands)\n` +
+        `3. Add it to your group as admin\n` +
+        `4. Paste the token here\n\n` +
+        `Bot will start sharing commands immediately. Send <code>clear</code> to remove.`,
+        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+      return;
+    }
+
     // Social links flow
     if (data === "cfg:social") {
       pendingState.set(chatId, { step: "await_social_telegram" });
@@ -1489,6 +1503,28 @@ export function startCommandBot(): void {
         await db.update(botConfigTable).set({ utilityBotToken: raw, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
         await bot.sendMessage(chatId,
           `✅ <b>Utility bot set!</b>\n\nRaid and vote alerts will now send through the separate bot.\n\nMake sure it's added to your group as an admin.`,
+          { parse_mode: "HTML" });
+      } else {
+        await bot.sendMessage(chatId,
+          `❌ That doesn't look like a valid bot token.\n\nFormat: <code>123456789:ABCdef...</code>\n\nGet it from @BotFather.`,
+          { parse_mode: "HTML" });
+      }
+      return;
+    }
+
+    // ── Co-bot token ──────────────────────────────────────────────────────────
+    if (state.step === "await_co_bot_token") {
+      const raw = (msg.text ?? "").trim();
+      pendingState.delete(chatId);
+      if (raw.toLowerCase() === "clear") {
+        await db.update(botConfigTable).set({ coBotToken: null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+        botRegistry.restartCoBot(config.id, null);
+        await bot.sendMessage(chatId, `✅ Co-bot removed.`);
+      } else if (raw.match(/^\d+:[A-Za-z0-9_-]{35,}$/)) {
+        await db.update(botConfigTable).set({ coBotToken: raw, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+        botRegistry.restartCoBot(config.id, raw);
+        await bot.sendMessage(chatId,
+          `✅ <b>Co-bot connected!</b>\n\nIt now shares all commands in this group. Make sure it's added as an admin.`,
           { parse_mode: "HTML" });
       } else {
         await bot.sendMessage(chatId,
