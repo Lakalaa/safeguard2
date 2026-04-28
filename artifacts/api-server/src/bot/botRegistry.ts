@@ -231,6 +231,7 @@ interface BotInstance {
   repeatTimer: ReturnType<typeof setInterval> | null;
   raidTimer: ReturnType<typeof setInterval> | null;
   voteTimer: ReturnType<typeof setInterval> | null;
+  broadcastTimer: ReturnType<typeof setInterval> | null;
 }
 
 // ── Twitter raid tracker ────────────────────────────────────────────────────────
@@ -436,6 +437,7 @@ class BotRegistry {
       if (existing.repeatTimer) { clearInterval(existing.repeatTimer); existing.repeatTimer = null; }
       if (existing.raidTimer) { clearInterval(existing.raidTimer); existing.raidTimer = null; }
       if (existing.voteTimer) { clearInterval(existing.voteTimer); existing.voteTimer = null; }
+      if (existing.broadcastTimer) { clearInterval(existing.broadcastTimer); existing.broadcastTimer = null; }
     }
 
     const [config] = await db
@@ -460,6 +462,7 @@ class BotRegistry {
       repeatTimer: null,
       raidTimer: null,
       voteTimer: null,
+      broadcastTimer: null,
     };
 
     try {
@@ -530,6 +533,16 @@ class BotRegistry {
         logger.info({ configId, intervalSecs: config.voteInterval }, "Vote timer started");
       }
 
+      // Start broadcast timer if configured
+      if (config.broadcastText && config.broadcastInterval && config.broadcastInterval > 0) {
+        inst.broadcastTimer = setInterval(() => {
+          this.sendBroadcast(configId).catch((err) =>
+            logger.error({ err, configId }, "Broadcast error"),
+          );
+        }, config.broadcastInterval * 1000);
+        logger.info({ configId, intervalSecs: config.broadcastInterval }, "Broadcast timer started");
+      }
+
       logger.info({ configId, token: config.tokenAddress, chain: chainId }, "Bot started");
       return { running: true };
     } catch (err) {
@@ -547,6 +560,7 @@ class BotRegistry {
     if (inst.repeatTimer) { clearInterval(inst.repeatTimer); inst.repeatTimer = null; }
     if (inst.raidTimer) { clearInterval(inst.raidTimer); inst.raidTimer = null; }
     if (inst.voteTimer) { clearInterval(inst.voteTimer); inst.voteTimer = null; }
+    if (inst.broadcastTimer) { clearInterval(inst.broadcastTimer); inst.broadcastTimer = null; }
     if (inst.monitor) {
       await inst.monitor.stop();
       inst.monitor = null;
@@ -564,7 +578,7 @@ class BotRegistry {
   restartRepeatTimer(configId: number, intervalSecs: number | null): void {
     let inst = this.instances.get(configId);
     if (!inst) {
-      inst = { chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null };
+      inst = { chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null, broadcastTimer: null };
       this.instances.set(configId, inst);
     }
 
@@ -589,7 +603,7 @@ class BotRegistry {
   restartRaidTimer(configId: number, intervalSecs: number | null): void {
     let inst = this.instances.get(configId);
     if (!inst) {
-      inst = { chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null };
+      inst = { chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null, broadcastTimer: null };
       this.instances.set(configId, inst);
     }
     if (inst.raidTimer) { clearInterval(inst.raidTimer); inst.raidTimer = null; }
@@ -609,8 +623,7 @@ class BotRegistry {
   restartVoteTimer(configId: number, intervalSecs: number | null): void {
     let inst = this.instances.get(configId);
     if (!inst) {
-      // Create a minimal stub so timers can run without monitoring
-      inst = { chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null };
+      inst = { chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null, broadcastTimer: null };
       this.instances.set(configId, inst);
     }
     if (inst.voteTimer) { clearInterval(inst.voteTimer); inst.voteTimer = null; }
@@ -624,6 +637,64 @@ class BotRegistry {
       logger.info({ configId, intervalSecs: secs }, "Vote timer updated");
     }
     this.instances.set(configId, inst);
+  }
+
+  /** Update broadcast timer live */
+  restartBroadcastTimer(configId: number, intervalSecs: number | null): void {
+    let inst = this.instances.get(configId);
+    if (!inst) {
+      inst = { chainId: "solana", running: false, lastCheckAt: null, error: null, monitor: null, dexCache: { data: null, fetchedAt: 0 }, repeatTimer: null, raidTimer: null, voteTimer: null, broadcastTimer: null };
+      this.instances.set(configId, inst);
+    }
+    if (inst.broadcastTimer) { clearInterval(inst.broadcastTimer); inst.broadcastTimer = null; }
+    const secs = intervalSecs ?? 0;
+    if (secs > 0) {
+      inst.broadcastTimer = setInterval(() => {
+        this.sendBroadcast(configId).catch((err) =>
+          logger.error({ err, configId }, "Broadcast error"),
+        );
+      }, secs * 1000);
+      logger.info({ configId, intervalSecs: secs }, "Broadcast timer updated");
+    }
+    this.instances.set(configId, inst);
+  }
+
+  private async sendBroadcast(configId: number): Promise<void> {
+    const [config] = await db
+      .select().from(botConfigTable).where(eq(botConfigTable.id, configId)).limit(1);
+    const token = resolveToken(config);
+    if (!token || !config?.chatId || !config.broadcastText) return;
+
+    const tgBot = new TelegramBot(token, { polling: false });
+
+    let keyboard: TelegramBot.InlineKeyboardMarkup | undefined;
+    if (config.broadcastButtons) {
+      try {
+        const btns = JSON.parse(config.broadcastButtons) as { text: string; url: string }[];
+        if (btns.length) {
+          const rows: TelegramBot.InlineKeyboardButton[][] = [];
+          for (let i = 0; i < btns.length; i += 2) {
+            rows.push(btns.slice(i, i + 2).map(b => ({ text: b.text, url: b.url })));
+          }
+          keyboard = { inline_keyboard: rows };
+        }
+      } catch { /* ignore bad JSON */ }
+    }
+
+    if (config.broadcastImageFileId) {
+      await tgBot.sendPhoto(config.chatId, config.broadcastImageFileId, {
+        caption: config.broadcastText,
+        parse_mode: "HTML",
+        ...(keyboard ? { reply_markup: keyboard } : {}),
+      });
+    } else {
+      await tgBot.sendMessage(config.chatId, config.broadcastText, {
+        parse_mode: "HTML",
+        disable_web_page_preview: false,
+        ...(keyboard ? { reply_markup: keyboard } : {}),
+      });
+    }
+    logger.info({ configId }, "Broadcast sent");
   }
 
   private async sendVoteAlert(configId: number): Promise<void> {
@@ -716,15 +787,17 @@ class BotRegistry {
         logger.info({ configId: config.id, name: config.name }, "Auto-starting bot");
         await this.start(config.id);
       } else {
-        // Even inactive bots: start any configured timers (vote/raid/repeat) independently
+        // Even inactive bots: start any configured timers independently
         const hasTimer = (config.voteInterval && config.voteInterval > 0)
           || (config.raidInterval && config.raidInterval > 0)
-          || (config.repeatInterval && config.repeatInterval > 0);
+          || (config.repeatInterval && config.repeatInterval > 0)
+          || (config.broadcastInterval && config.broadcastInterval > 0 && !!config.broadcastText);
         if (hasTimer) {
           logger.info({ configId: config.id }, "Starting timers for inactive bot");
           if (config.voteInterval && config.voteInterval > 0) this.restartVoteTimer(config.id, config.voteInterval);
           if (config.raidInterval && config.raidInterval > 0) this.restartRaidTimer(config.id, config.raidInterval);
           if (config.repeatInterval && config.repeatInterval > 0) this.restartRepeatTimer(config.id, config.repeatInterval);
+          if (config.broadcastInterval && config.broadcastInterval > 0 && config.broadcastText) this.restartBroadcastTimer(config.id, config.broadcastInterval);
         }
       }
     }

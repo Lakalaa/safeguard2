@@ -37,7 +37,10 @@ type PendingState =
   | { step: "await_vote_image" }
   | { step: "await_vote_buttons" }
   | { step: "await_filter_buttons"; commandName: string; messageText: string }
-  | { step: "await_utility_token" };
+  | { step: "await_utility_token" }
+  | { step: "await_broadcast_text" }
+  | { step: "await_broadcast_image" }
+  | { step: "await_broadcast_buttons" };
 
 const pendingState = new Map<string, PendingState>();
 
@@ -112,6 +115,9 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
         { text: config.utilityBotToken ? "🤖 Util Bot ✅" : "🤖 Util Bot", callback_data: "cfg:utility" },
       ],
       [
+        { text: config.broadcastInterval ? "📢 Broadcast ✅" : "📢 Broadcast", callback_data: "cfg:broadcast" },
+      ],
+      [
         {
           text: running ? "⏹ Stop" : "▶️ Start Monitoring",
           callback_data: running ? "action:stop" : "action:start",
@@ -183,6 +189,38 @@ function raidIntervalKeyboard(tweetUrl: string, current: number | null | undefin
       [{ text: "⬅️ Back", callback_data: "action:settings" }],
     ],
   };
+}
+
+function broadcastKeyboard(config: BotConfig): TelegramBot.InlineKeyboardMarkup {
+  const presets = [
+    { label: "Off", secs: 0 },
+    { label: "30s", secs: 30 },
+    { label: "1min", secs: 60 },
+    { label: "5min", secs: 300 },
+    { label: "15min", secs: 900 },
+    { label: "30min", secs: 1800 },
+    { label: "1hr", secs: 3600 },
+    { label: "6hr", secs: 21600 },
+    { label: "24hr", secs: 86400 },
+  ];
+  const cur = config.broadcastInterval ?? 0;
+  const rows: TelegramBot.InlineKeyboardButton[][] = [];
+  for (let i = 0; i < presets.length; i += 5) {
+    rows.push(presets.slice(i, i + 5).map(p => ({
+      text: p.secs === cur ? `✅ ${p.label}` : p.label,
+      callback_data: `set:broadcast:interval:${p.secs}`,
+    })));
+  }
+  rows.push([
+    { text: config.broadcastText ? "✏️ Edit Message ✅" : "✏️ Set Message", callback_data: "cfg:broadcast:text" },
+    { text: config.broadcastImageFileId ? "🖼 Image ✅" : "🖼 Add Image", callback_data: "cfg:broadcast:image" },
+  ]);
+  rows.push([
+    { text: config.broadcastButtons ? "🔗 Buttons ✅" : "🔗 Add Buttons", callback_data: "cfg:broadcast:buttons" },
+    { text: "🗑 Clear All", callback_data: "cfg:broadcast:clear" },
+  ]);
+  rows.push([{ text: "⬅️ Back", callback_data: "action:settings" }]);
+  return { inline_keyboard: rows };
 }
 
 function voteMenuKeyboard(config: BotConfig): TelegramBot.InlineKeyboardMarkup {
@@ -1002,6 +1040,67 @@ export function startCommandBot(): void {
       return;
     }
 
+    // ── Broadcast setup ──────────────────────────────────────────────────────
+    if (data === "cfg:broadcast" || data.startsWith("set:broadcast:interval:") || data.startsWith("cfg:broadcast:")) {
+      // Timer interval presets
+      if (data.startsWith("set:broadcast:interval:")) {
+        const secs = parseInt(data.split(":")[3]!, 10);
+        await db.update(botConfigTable).set({ broadcastInterval: secs > 0 ? secs : null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+        const updated = await getOrCreate(chatId);
+        botRegistry.restartBroadcastTimer(config.id, secs > 0 ? secs : null);
+        await bot.editMessageReplyMarkup(broadcastKeyboard(updated), { chat_id: chatId, message_id: msgId }).catch(() => null);
+        return;
+      }
+
+      // Open main broadcast menu
+      if (data === "cfg:broadcast") {
+        const lines: string[] = [`📢 <b>Broadcast Setup</b>\n`];
+        if (config.broadcastText) lines.push(`📝 Message: <i>${config.broadcastText.slice(0, 80)}${config.broadcastText.length > 80 ? "…" : ""}</i>`);
+        else lines.push(`📝 Message: <i>not set</i>`);
+        lines.push(`🖼 Image: ${config.broadcastImageFileId ? "✅ set" : "not set"}`);
+        lines.push(`🔗 Buttons: ${config.broadcastButtons ? `✅ ${(JSON.parse(config.broadcastButtons) as {text:string}[]).length} button(s)` : "none"}`);
+        lines.push(`⏱ Timer: <b>${formatInterval(config.broadcastInterval)}</b>`);
+        await bot.editMessageText(lines.join("\n"), { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: broadcastKeyboard(config) }).catch(() => null);
+        return;
+      }
+
+      // Set message text
+      if (data === "cfg:broadcast:text") {
+        pendingState.set(chatId, { step: "await_broadcast_text" });
+        await bot.sendMessage(chatId,
+          `✏️ <b>Broadcast Message</b>\n\nSend the message text you want posted on repeat.\nSupports bold, links, emojis — anything Telegram HTML supports.`,
+          { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+        return;
+      }
+
+      // Set image
+      if (data === "cfg:broadcast:image") {
+        pendingState.set(chatId, { step: "await_broadcast_image" });
+        await bot.sendMessage(chatId,
+          `🖼 <b>Broadcast Image</b>\n\nSend a photo to use as the banner for your broadcast.\n\nOr send <code>clear</code> to remove the current image.`,
+          { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+        return;
+      }
+
+      // Set buttons
+      if (data === "cfg:broadcast:buttons") {
+        pendingState.set(chatId, { step: "await_broadcast_buttons" });
+        await bot.sendMessage(chatId,
+          `🔗 <b>Broadcast Buttons</b>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://horny.xyz</code>\n<code>🛒 Buy Now | https://jup.ag</code>\n\nUp to 4 buttons, 2 per row. Send <code>clear</code> to remove all.`,
+          { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+        return;
+      }
+
+      // Clear all broadcast config
+      if (data === "cfg:broadcast:clear") {
+        await db.update(botConfigTable).set({ broadcastText: null, broadcastImageFileId: null, broadcastButtons: null, broadcastInterval: null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+        botRegistry.restartBroadcastTimer(config.id, null);
+        const updated = await getOrCreate(chatId);
+        await bot.editMessageText(`📢 <b>Broadcast cleared.</b>`, { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: broadcastKeyboard(updated) }).catch(() => null);
+        return;
+      }
+    }
+
     // Utility bot token (for raid + vote alerts)
     if (data === "cfg:utility") {
       const current = config.utilityBotToken;
@@ -1301,6 +1400,70 @@ export function startCommandBot(): void {
       const updated = await getOrCreate(chatId);
       await bot.sendMessage(chatId, `✅ ${buttons.length} button(s) saved.`, { parse_mode: "HTML" });
       await bot.sendMessage(chatId, "Back to Vote settings:", { parse_mode: "HTML", reply_markup: voteMenuKeyboard(updated) });
+      return;
+    }
+
+    // ── Broadcast: message text ───────────────────────────────────────────────
+    if (state.step === "await_broadcast_text") {
+      const text = (msg.text ?? "").trim();
+      if (!text) return;
+      pendingState.delete(chatId);
+      await db.update(botConfigTable).set({ broadcastText: text, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      const updated = await getOrCreate(chatId);
+      await bot.sendMessage(chatId,
+        `✅ Broadcast message saved!\n\nNow set a timer below to start posting it:`,
+        { parse_mode: "HTML", reply_markup: broadcastKeyboard(updated) });
+      return;
+    }
+
+    // ── Broadcast: image ──────────────────────────────────────────────────────
+    if (state.step === "await_broadcast_image") {
+      const rawText = (msg.text ?? "").trim().toLowerCase();
+      if (rawText === "clear") {
+        pendingState.delete(chatId);
+        await db.update(botConfigTable).set({ broadcastImageFileId: null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+        const updated = await getOrCreate(chatId);
+        await bot.sendMessage(chatId, `🗑 Broadcast image removed.`, { parse_mode: "HTML", reply_markup: broadcastKeyboard(updated) });
+        return;
+      }
+      const photo = msg.photo;
+      if (!photo || photo.length === 0) {
+        await bot.sendMessage(chatId, `❌ Please send a photo, or type <code>clear</code> to remove the current one.`, { parse_mode: "HTML" });
+        return;
+      }
+      const fileId = photo[photo.length - 1]!.file_id;
+      pendingState.delete(chatId);
+      await db.update(botConfigTable).set({ broadcastImageFileId: fileId, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      const updated = await getOrCreate(chatId);
+      await bot.sendMessage(chatId, `✅ Broadcast image saved!`, { parse_mode: "HTML", reply_markup: broadcastKeyboard(updated) });
+      return;
+    }
+
+    // ── Broadcast: buttons ────────────────────────────────────────────────────
+    if (state.step === "await_broadcast_buttons") {
+      const rawText = (msg.text ?? "").trim();
+      pendingState.delete(chatId);
+      if (rawText.toLowerCase() === "clear") {
+        await db.update(botConfigTable).set({ broadcastButtons: null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+        const updated = await getOrCreate(chatId);
+        await bot.sendMessage(chatId, `🗑 Broadcast buttons cleared.`, { parse_mode: "HTML", reply_markup: broadcastKeyboard(updated) });
+        return;
+      }
+      const lines = rawText.split("\n").filter(Boolean).slice(0, 4);
+      const buttons: { text: string; url: string }[] = [];
+      for (const line of lines) {
+        const parts = line.split("|").map(s => s.trim());
+        const btnText = parts[0]; const btnUrl = parts[1];
+        if (!btnText || !btnUrl || !btnUrl.startsWith("http")) {
+          await bot.sendMessage(chatId, `❌ Invalid line: <code>${line}</code>\nFormat: <code>Label | https://url</code>`, { parse_mode: "HTML" });
+          pendingState.set(chatId, { step: "await_broadcast_buttons" });
+          return;
+        }
+        buttons.push({ text: btnText, url: btnUrl });
+      }
+      await db.update(botConfigTable).set({ broadcastButtons: JSON.stringify(buttons), updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      const updated = await getOrCreate(chatId);
+      await bot.sendMessage(chatId, `✅ ${buttons.length} button(s) saved!`, { parse_mode: "HTML", reply_markup: broadcastKeyboard(updated) });
       return;
     }
 

@@ -45,6 +45,10 @@ export const botConfigTable = pgTable("bot_config", {
   voteImageFileId: text("vote_image_file_id"), // Telegram file_id for banner image
   voteButtons: text("vote_buttons"), // JSON: [{text,url}]
   utilityBotToken: text("utility_bot_token"), // separate bot token for raid+vote alerts
+  broadcastText: text("broadcast_text"),          // custom broadcast message
+  broadcastImageFileId: text("broadcast_image_file_id"), // Telegram file_id for broadcast image
+  broadcastButtons: text("broadcast_buttons"),     // JSON: [{text, url}]
+  broadcastInterval: integer("broadcast_interval"), // seconds; null = off
   telegramUrl: text("telegram_url"),
   twitterUrl: text("twitter_url"),
   websiteUrl: text("website_url"),
