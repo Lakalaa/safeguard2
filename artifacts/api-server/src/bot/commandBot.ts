@@ -1282,14 +1282,15 @@ export function createCommandBot(token: string): TelegramBot {
       pendingState.set(chatId, { step: "await_co_bot_token" });
       await bot.sendMessage(chatId,
         `🤝 <b>Co-Bot Setup</b>\n\n` +
-        `A co-bot shares all commands (<code>/setup</code>, <code>/filter</code>, etc.) in your group from a <b>second bot account</b>. Members can interact with either bot — both respond identically.\n\n` +
+        `A co-bot is a <b>second bot account</b> that mirrors everything — buy alerts, broadcast, vote alerts, raid alerts, repeat alerts, and all commands (<code>/setup</code>, <code>/filter</code>, etc.). Every message your main bot sends, the co-bot sends too.\n\n` +
+        `Useful for: backup if your main bot gets banned, or running two bots simultaneously for more visibility.\n\n` +
         (current ? `Current: <code>${current.slice(0, 10)}…</code> ✅\n\n` : ``) +
         `<b>Steps:</b>\n` +
         `1. Open @BotFather → /newbot\n` +
-        `2. Name it (e.g. HORNY Commands)\n` +
+        `2. Name it anything (e.g. HORNY Alerts 2)\n` +
         `3. Add it to your group as admin\n` +
         `4. Paste the token here\n\n` +
-        `Bot will start sharing commands immediately. Send <code>clear</code> to remove.`,
+        `Both bots will post simultaneously. Send <code>clear</code> to remove.`,
         { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
       return;
     }

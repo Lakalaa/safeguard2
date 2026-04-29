@@ -712,8 +712,6 @@ class BotRegistry {
     const token = resolveToken(config);
     if (!token || !config?.chatId || !config.broadcastText) return;
 
-    const tgBot = new TelegramBot(token, { polling: false });
-
     let keyboard: TelegramBot.InlineKeyboardMarkup | undefined;
     if (config.broadcastButtons) {
       try {
@@ -728,20 +726,24 @@ class BotRegistry {
       } catch { /* ignore bad JSON */ }
     }
 
-    if (config.broadcastImageFileId) {
-      await tgBot.sendPhoto(config.chatId, config.broadcastImageFileId, {
-        caption: config.broadcastText,
-        parse_mode: "HTML",
-        ...(keyboard ? { reply_markup: keyboard } : {}),
-      });
-    } else {
-      await tgBot.sendMessage(config.chatId, config.broadcastText, {
-        parse_mode: "HTML",
-        disable_web_page_preview: false,
-        ...(keyboard ? { reply_markup: keyboard } : {}),
-      });
+    const broadcastTokens = [token, ...(config.coBotToken ? [config.coBotToken] : [])];
+    for (const tk of broadcastTokens) {
+      const tgBot = new TelegramBot(tk, { polling: false });
+      if (config.broadcastImageFileId) {
+        await tgBot.sendPhoto(config.chatId, config.broadcastImageFileId, {
+          caption: config.broadcastText,
+          parse_mode: "HTML",
+          ...(keyboard ? { reply_markup: keyboard } : {}),
+        }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot broadcast photo failed"));
+      } else {
+        await tgBot.sendMessage(config.chatId, config.broadcastText, {
+          parse_mode: "HTML",
+          disable_web_page_preview: false,
+          ...(keyboard ? { reply_markup: keyboard } : {}),
+        }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot broadcast message failed"));
+      }
     }
-    logger.info({ configId }, "Broadcast sent");
+    logger.info({ configId, bots: broadcastTokens.length }, "Broadcast sent");
   }
 
   private async sendVoteAlert(configId: number): Promise<void> {
@@ -760,21 +762,23 @@ class BotRegistry {
 
     const message = buildVoteMessage({ ...config, voteCount: newCount }, newCount);
     const keyboard = buildVoteKeyboard(config);
-    const tgBot = new TelegramBot(token, { polling: false });
-
-    if (config.voteImageFileId) {
-      await tgBot.sendPhoto(config.chatId, config.voteImageFileId, {
-        caption: message,
-        parse_mode: "HTML",
-        ...(keyboard ? { reply_markup: keyboard } : {}),
-      });
-    } else {
-      await tgBot.sendMessage(config.chatId, message, {
-        parse_mode: "HTML",
-        ...(keyboard ? { reply_markup: keyboard } : {}),
-      });
+    const voteTokens = [token, ...(config.coBotToken ? [config.coBotToken] : [])];
+    for (const tk of voteTokens) {
+      const tgBot = new TelegramBot(tk, { polling: false });
+      if (config.voteImageFileId) {
+        await tgBot.sendPhoto(config.chatId, config.voteImageFileId, {
+          caption: message,
+          parse_mode: "HTML",
+          ...(keyboard ? { reply_markup: keyboard } : {}),
+        }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot vote photo failed"));
+      } else {
+        await tgBot.sendMessage(config.chatId, message, {
+          parse_mode: "HTML",
+          ...(keyboard ? { reply_markup: keyboard } : {}),
+        }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot vote message failed"));
+      }
     }
-    logger.info({ configId, newCount }, "Vote alert sent");
+    logger.info({ configId, newCount, bots: voteTokens.length }, "Vote alert sent");
   }
 
   private async sendRaidAlert(configId: number): Promise<void> {
@@ -817,13 +821,16 @@ class BotRegistry {
       ].join("\n");
     }
 
-    const tgBot = new TelegramBot(token, { polling: false });
-    await tgBot.sendMessage(config.chatId, text, {
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-      reply_markup: keyboard,
-    });
-    logger.info({ configId, tweetId, hasMetrics: !!metrics }, "Raid alert sent");
+    const raidTokens = [token, ...(config.coBotToken ? [config.coBotToken] : [])];
+    for (const tk of raidTokens) {
+      const tgBot = new TelegramBot(tk, { polling: false });
+      await tgBot.sendMessage(config.chatId, text, {
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+        reply_markup: keyboard,
+      }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot raid message failed"));
+    }
+    logger.info({ configId, tweetId, hasMetrics: !!metrics, bots: raidTokens.length }, "Raid alert sent");
   }
 
   private async sendRepeatAlert(configId: number): Promise<void> {
@@ -840,12 +847,15 @@ class BotRegistry {
     const chainName = chainConfig?.name ?? inst.chainId;
 
     const message = buildRepeatMessage(config, dexData, chainName);
-    const tgBot = new TelegramBot(token, { polling: false });
-    await tgBot.sendMessage(config.chatId, message, {
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-    });
-    logger.info({ configId }, "Repeat alert sent");
+    const repeatTokens = [token, ...(config.coBotToken ? [config.coBotToken] : [])];
+    for (const tk of repeatTokens) {
+      const tgBot = new TelegramBot(tk, { polling: false });
+      await tgBot.sendMessage(config.chatId, message, {
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+      }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot repeat message failed"));
+    }
+    logger.info({ configId, bots: repeatTokens.length }, "Repeat alert sent");
   }
 
   async autoStartAll(): Promise<void> {
@@ -939,7 +949,6 @@ class BotRegistry {
       tier,
     });
 
-    const tgBot = new TelegramBot(token, { polling: false });
     const alertParams: AlertParams = {
       tokenName: config.tokenName ?? dexData?.baseToken.name ?? "Token",
       tokenSymbol: config.tokenSymbol ?? dexData?.baseToken.symbol ?? "TKN",
@@ -975,25 +984,29 @@ class BotRegistry {
     const mediaType = config.alertMediaType ?? "photo";
     const mediaUrl = config.alertImageUrl;
 
-    if (mediaFileId || mediaUrl) {
-      const mediaSrc = (mediaFileId ?? mediaUrl) as string;
-      const mediaOpts = { caption: message, parse_mode: "HTML" as const, reply_markup: keyboard };
-      if (mediaType === "video") {
-        await tgBot.sendVideo(config.chatId, mediaSrc, mediaOpts);
-      } else if (mediaType === "animation") {
-        await tgBot.sendAnimation(config.chatId, mediaSrc, mediaOpts);
+    const alertTokens = [token, ...(config.coBotToken ? [config.coBotToken] : [])];
+    for (const tk of alertTokens) {
+      const tgBot = new TelegramBot(tk, { polling: false });
+      if (mediaFileId || mediaUrl) {
+        const mediaSrc = (mediaFileId ?? mediaUrl) as string;
+        const mediaOpts = { caption: message, parse_mode: "HTML" as const, reply_markup: keyboard };
+        if (mediaType === "video") {
+          await tgBot.sendVideo(config.chatId, mediaSrc, mediaOpts).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy video failed"));
+        } else if (mediaType === "animation") {
+          await tgBot.sendAnimation(config.chatId, mediaSrc, mediaOpts).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy animation failed"));
+        } else {
+          await tgBot.sendPhoto(config.chatId, mediaSrc, mediaOpts).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy photo failed"));
+        }
       } else {
-        await tgBot.sendPhoto(config.chatId, mediaSrc, mediaOpts);
+        await tgBot.sendMessage(config.chatId, message, {
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+          reply_markup: keyboard,
+        }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed"));
       }
-    } else {
-      await tgBot.sendMessage(config.chatId, message, {
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-        reply_markup: keyboard,
-      });
     }
 
-    logger.info({ configId, buyer: event.buyerAddress, amountUsd, chain: chainId, tier }, "Buy alert sent");
+    logger.info({ configId, buyer: event.buyerAddress, amountUsd, chain: chainId, tier, bots: alertTokens.length }, "Buy alert sent");
   }
 
   private async getCachedDexData(tokenAddress: string, inst: BotInstance): Promise<DexScreenerPair | null> {
