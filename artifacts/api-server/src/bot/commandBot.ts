@@ -41,7 +41,10 @@ type PendingState =
   | { step: "await_broadcast_text" }
   | { step: "await_broadcast_image" }
   | { step: "await_broadcast_buttons" }
-  | { step: "await_co_bot_token" };
+  | { step: "await_co_bot_token" }
+  | { step: "await_post_text" }
+  | { step: "await_post_image"; text: string }
+  | { step: "await_post_buttons"; text: string; imageFileId?: string };
 
 const pendingState = new Map<string, PendingState>();
 
@@ -53,6 +56,15 @@ async function isAdmin(bot: TelegramBot, chatId: string | number, userId: number
   } catch {
     return false;
   }
+}
+
+// ── Button row builder — 2 buttons per row ────────────────────────────────────
+function buildButtonRows(buttons: { text: string; url: string }[]): TelegramBot.InlineKeyboardButton[][] {
+  const rows: TelegramBot.InlineKeyboardButton[][] = [];
+  for (let i = 0; i < buttons.length; i += 2) {
+    rows.push(buttons.slice(i, i + 2).map((b) => ({ text: b.text, url: b.url })));
+  }
+  return rows;
 }
 
 // ── Get or create bot config row for a chat ───────────────────────────────────
@@ -220,6 +232,9 @@ function broadcastKeyboard(config: BotConfig): TelegramBot.InlineKeyboardMarkup 
     { text: config.broadcastButtons ? "🔗 Buttons ✅" : "🔗 Add Buttons", callback_data: "cfg:broadcast:buttons" },
     { text: "🗑 Clear All", callback_data: "cfg:broadcast:clear" },
   ]);
+  if (config.broadcastText) {
+    rows.push([{ text: "📨 Send Now", callback_data: "cfg:broadcast:sendnow" }]);
+  }
   rows.push([{ text: "⬅️ Back", callback_data: "action:settings" }]);
   return { inline_keyboard: rows };
 }
@@ -420,6 +435,7 @@ export function createCommandBot(token: string): TelegramBot {
     { command: "raid", description: "Open Raid Tracker setup" },
     { command: "vote", description: "Open Vote Alert setup" },
     { command: "filter", description: "Admin: create/manage custom commands" },
+    { command: "post", description: "Post a message with buttons to the group" },
   ]).catch(() => null);
 
   bot.on("polling_error", (err) => {
@@ -756,6 +772,22 @@ export function createCommandBot(token: string): TelegramBot {
     await sendVoteMenu(bot, chatId, config);
   });
 
+  // ── /post ─────────────────────────────────────────────────────────────────
+  bot.onText(/^\/post(@\S+)?$/, async (msg) => {
+    if (!msg.from) return;
+    const chatId = String(msg.chat.id);
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    pendingState.set(chatId, { step: "await_post_text" });
+    await bot.sendMessage(chatId,
+      `📨 <b>Post a Message</b>\n\nSend the message text you want to post to the group.\n\n` +
+      `You can use HTML formatting:\n` +
+      `• <code>&lt;b&gt;bold&lt;/b&gt;</code>\n` +
+      `• <code>&lt;i&gt;italic&lt;/i&gt;</code>\n` +
+      `• <code>&lt;a href="url"&gt;link&lt;/a&gt;</code>\n\n` +
+      `Send <code>cancel</code> to abort.`,
+      { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+  });
+
   // ── /status ───────────────────────────────────────────────────────────────
   bot.onText(/^\/status(@\S+)?$/, async (msg) => {
     if (!msg.from) return;
@@ -793,7 +825,7 @@ export function createCommandBot(token: string): TelegramBot {
       }
       pendingState.set(chatId, { step: "await_filter_buttons", commandName, messageText: cmd.messageText });
       await bot.sendMessage(chatId,
-        `➕ Adding buttons to <code>/${commandName}</code>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://horny.xyz</code>\n<code>🛒 Buy | https://jup.ag</code>`,
+        `➕ Adding buttons to <code>/${commandName}</code>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://horny.xyz</code>\n<code>🛒 Buy | https://jup.ag</code>\n<code>📊 Chart | https://dexscreener.com/...</code>\n\nUp to 8 buttons, displayed 2 per row.`,
         { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
       return;
     }
@@ -1087,7 +1119,7 @@ export function createCommandBot(token: string): TelegramBot {
     if (data === "cfg:vote:buttons") {
       pendingState.set(chatId, { step: "await_vote_buttons" });
       await bot.sendMessage(chatId,
-        `🔗 <b>Custom Buttons</b>\n\nSend one button per line in this format:\n<code>Button Text | https://link.com</code>\n\nExample:\n<code>🗳 Vote for TOKEN | https://coinvote.cc/token/TOKEN\n🎰 Create Raffle | https://t.me/rafflebot\n⚡ Boost Votes | https://example.com\n🔥 Buy Trending | https://dexscreener.com</code>\n\nUp to 4 buttons, shown 2 per row. Send <code>clear</code> to remove all buttons.`,
+        `🔗 <b>Custom Buttons</b>\n\nSend one button per line in this format:\n<code>Button Text | https://link.com</code>\n\nExample:\n<code>🗳 Vote for TOKEN | https://coinvote.cc/token/TOKEN\n🎰 Create Raffle | https://t.me/rafflebot\n⚡ Boost Votes | https://example.com\n🔥 Buy Trending | https://dexscreener.com</code>\n\nUp to 8 buttons, shown 2 per row. Send <code>clear</code> to remove all buttons.`,
         { parse_mode: "HTML" },
       );
       return;
@@ -1139,7 +1171,7 @@ export function createCommandBot(token: string): TelegramBot {
       if (data === "cfg:broadcast:buttons") {
         pendingState.set(chatId, { step: "await_broadcast_buttons" });
         await bot.sendMessage(chatId,
-          `🔗 <b>Broadcast Buttons</b>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://horny.xyz</code>\n<code>🛒 Buy Now | https://jup.ag</code>\n\nUp to 4 buttons, 2 per row. Send <code>clear</code> to remove all.`,
+          `🔗 <b>Broadcast Buttons</b>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://horny.xyz</code>\n<code>🛒 Buy Now | https://jup.ag</code>\n<code>📊 Chart | https://dexscreener.com/...</code>\n\nUp to 8 buttons, 2 per row. Send <code>clear</code> to remove all.`,
           { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
         return;
       }
@@ -1150,6 +1182,43 @@ export function createCommandBot(token: string): TelegramBot {
         botRegistry.restartBroadcastTimer(config.id, null);
         const updated = await getOrCreate(chatId);
         await bot.editMessageText(`📢 <b>Broadcast cleared.</b>`, { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: broadcastKeyboard(updated) }).catch(() => null);
+        return;
+      }
+
+      // Send broadcast immediately
+      if (data === "cfg:broadcast:sendnow") {
+        if (!config.broadcastText) {
+          await bot.answerCallbackQuery(query.id, { text: "❌ No message set yet.", show_alert: true });
+          return;
+        }
+        if (!config.chatId) {
+          await bot.answerCallbackQuery(query.id, { text: "❌ No group linked.", show_alert: true });
+          return;
+        }
+        try {
+          let keyboard: TelegramBot.InlineKeyboardMarkup | undefined;
+          if (config.broadcastButtons) {
+            const btns = JSON.parse(config.broadcastButtons) as { text: string; url: string }[];
+            if (btns.length) keyboard = { inline_keyboard: buildButtonRows(btns) };
+          }
+          if (config.broadcastImageFileId) {
+            await bot.sendPhoto(config.chatId, config.broadcastImageFileId, {
+              caption: config.broadcastText,
+              parse_mode: "HTML",
+              ...(keyboard ? { reply_markup: keyboard } : {}),
+            });
+          } else {
+            await bot.sendMessage(config.chatId, config.broadcastText, {
+              parse_mode: "HTML",
+              disable_web_page_preview: false,
+              ...(keyboard ? { reply_markup: keyboard } : {}),
+            });
+          }
+          await bot.answerCallbackQuery(query.id, { text: "✅ Sent to group!" });
+        } catch (err) {
+          logger.error({ err }, "Broadcast send now failed");
+          await bot.answerCallbackQuery(query.id, { text: "❌ Failed to send. Check bot permissions.", show_alert: true });
+        }
         return;
       }
     }
@@ -1453,7 +1522,7 @@ export function createCommandBot(token: string): TelegramBot {
         await bot.sendMessage(chatId, "Back to Vote settings:", { parse_mode: "HTML", reply_markup: voteMenuKeyboard(updated) });
         return;
       }
-      const lines = rawText.split("\n").filter(Boolean).slice(0, 4);
+      const lines = rawText.split("\n").filter(Boolean).slice(0, 8);
       const buttons: { text: string; url: string }[] = [];
       for (const line of lines) {
         const [btnText, btnUrl] = line.split("|").map((s) => s.trim());
@@ -1520,7 +1589,7 @@ export function createCommandBot(token: string): TelegramBot {
         await bot.sendMessage(chatId, `🗑 Broadcast buttons cleared.`, { parse_mode: "HTML", reply_markup: broadcastKeyboard(updated) });
         return;
       }
-      const lines = rawText.split("\n").filter(Boolean).slice(0, 4);
+      const lines = rawText.split("\n").filter(Boolean).slice(0, 8);
       const buttons: { text: string; url: string }[] = [];
       for (const line of lines) {
         const parts = line.split("|").map(s => s.trim());
@@ -1580,12 +1649,98 @@ export function createCommandBot(token: string): TelegramBot {
       return;
     }
 
+    // ── /post step 1: capture message text ────────────────────────────────────
+    if (state.step === "await_post_text") {
+      const text = (msg.text ?? "").trim();
+      if (text.toLowerCase() === "cancel") {
+        pendingState.delete(chatId);
+        await bot.sendMessage(chatId, `❌ Post cancelled.`);
+        return;
+      }
+      if (!text) return;
+      pendingState.delete(chatId);
+      pendingState.set(chatId, { step: "await_post_image", text });
+      await bot.sendMessage(chatId,
+        `✅ Message saved!\n\n🖼 <b>Add an Image?</b>\n\nSend a photo to attach as a banner, or send <code>skip</code> to post without an image.`,
+        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+      return;
+    }
+
+    // ── /post step 2: optional image ──────────────────────────────────────────
+    if (state.step === "await_post_image") {
+      const rawText = (msg.text ?? "").trim().toLowerCase();
+      const photo = msg.photo;
+      let imageFileId: string | undefined;
+      if (rawText === "skip") {
+        // no image
+      } else if (photo && photo.length > 0) {
+        imageFileId = photo[photo.length - 1]!.file_id;
+      } else {
+        await bot.sendMessage(chatId,
+          `📸 Send a photo to attach, or type <code>skip</code> to continue without one.`,
+          { parse_mode: "HTML" });
+        return;
+      }
+      pendingState.delete(chatId);
+      pendingState.set(chatId, { step: "await_post_buttons", text: state.text, imageFileId });
+      await bot.sendMessage(chatId,
+        `${imageFileId ? "✅ Image saved!\n\n" : ""}🔗 <b>Add Buttons?</b>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://example.com</code>\n<code>🛒 Buy Now | https://jup.ag/...</code>\n\nUp to 8 buttons, displayed 2 per row.\n\nOr send <code>skip</code> to post without buttons.`,
+        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+      return;
+    }
+
+    // ── /post step 3: optional buttons → send to group ────────────────────────
+    if (state.step === "await_post_buttons") {
+      const rawText = (msg.text ?? "").trim();
+      pendingState.delete(chatId);
+      let buttons: { text: string; url: string }[] = [];
+      if (rawText.toLowerCase() !== "skip") {
+        const lines = rawText.split("\n").filter(Boolean).slice(0, 8);
+        for (const line of lines) {
+          const parts = line.split("|").map((s) => s.trim());
+          const btnText = parts[0];
+          const btnUrl = parts[1];
+          if (!btnText || !btnUrl || !btnUrl.startsWith("http")) {
+            await bot.sendMessage(chatId,
+              `❌ Invalid line: <code>${line}</code>\n\nFormat: <code>Button Label | https://url</code>\n\nSend all buttons again, or <code>skip</code> to post without buttons:`,
+              { parse_mode: "HTML" });
+            pendingState.set(chatId, { step: "await_post_buttons", text: state.text, imageFileId: state.imageFileId });
+            return;
+          }
+          buttons.push({ text: btnText, url: btnUrl });
+        }
+      }
+      const keyboard = buttons.length > 0
+        ? { inline_keyboard: buildButtonRows(buttons) }
+        : undefined;
+      try {
+        if (state.imageFileId) {
+          await bot.sendPhoto(chatId, state.imageFileId, {
+            caption: state.text,
+            parse_mode: "HTML",
+            ...(keyboard ? { reply_markup: keyboard } : {}),
+          });
+        } else {
+          await bot.sendMessage(chatId, state.text, {
+            parse_mode: "HTML",
+            disable_web_page_preview: false,
+            ...(keyboard ? { reply_markup: keyboard } : {}),
+          });
+        }
+        await bot.sendMessage(chatId, `✅ <b>Posted!</b>${buttons.length > 0 ? ` ${buttons.length} button(s) included.` : ""}`, { parse_mode: "HTML" });
+      } catch (err) {
+        logger.error({ err }, "/post send failed");
+        await bot.sendMessage(chatId, `❌ Failed to post. Make sure the bot has permission to send messages in this group.`, { parse_mode: "HTML" });
+      }
+      return;
+    }
+
     // ── /filter buttons: admin sends button lines after clicking "Add Buttons" ──
     if (state.step === "await_filter_buttons") {
       const rawText = (msg.text ?? "").trim();
       const { commandName, messageText } = state;
 
-      const lines = rawText.split("\n").filter(Boolean).slice(0, 5);
+      const lines = rawText.split("\n").filter(Boolean).slice(0, 8);
       const buttons: { text: string; url: string }[] = [];
       for (const line of lines) {
         const parts = line.split("|").map((s) => s.trim());
@@ -1704,7 +1859,7 @@ export function createCommandBot(token: string): TelegramBot {
     await bot.sendMessage(chatId, cmd.messageText, {
       parse_mode: "HTML",
       disable_web_page_preview: false,
-      ...(buttons.length > 0 ? { reply_markup: { inline_keyboard: [buttons] } } : {}),
+      ...(buttons.length > 0 ? { reply_markup: { inline_keyboard: buildButtonRows(buttons) } } : {}),
     }).catch(() => null);
   });
 
