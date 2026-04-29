@@ -239,6 +239,23 @@ function broadcastKeyboard(config: BotConfig): TelegramBot.InlineKeyboardMarkup 
   return { inline_keyboard: rows };
 }
 
+function postRepeatKeyboard(): TelegramBot.InlineKeyboardMarkup {
+  const presets = [
+    { label: "30m", secs: 1800 },
+    { label: "1hr", secs: 3600 },
+    { label: "3hr", secs: 10800 },
+    { label: "6hr", secs: 21600 },
+    { label: "12hr", secs: 43200 },
+    { label: "24hr", secs: 86400 },
+  ];
+  return {
+    inline_keyboard: [
+      presets.map(p => ({ text: p.label, callback_data: `post:repeat:${p.secs}` })),
+      [{ text: "⛔ No Repeat", callback_data: "post:norepeat" }],
+    ],
+  };
+}
+
 function voteMenuKeyboard(config: BotConfig): TelegramBot.InlineKeyboardMarkup {
   const presets = [
     { label: "Off", secs: 0 },
@@ -833,6 +850,24 @@ export function createCommandBot(token: string): TelegramBot {
     // filter_done — admin dismissed the add-buttons prompt
     if (data.startsWith("filter_done:")) {
       await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: msgId }).catch(() => null);
+      return;
+    }
+
+    // post:norepeat — admin dismissed the repeat timer picker after /post
+    if (data === "post:norepeat") {
+      await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: msgId }).catch(() => null);
+      await bot.answerCallbackQuery(query.id, { text: "No repeat set." });
+      return;
+    }
+
+    // post:repeat:<secs> — admin picked a repeat interval after /post
+    if (data.startsWith("post:repeat:")) {
+      const secs = parseInt(data.split(":")[2]!, 10);
+      await db.update(botConfigTable).set({ broadcastInterval: secs > 0 ? secs : null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      botRegistry.restartBroadcastTimer(config.id, secs > 0 ? secs : null);
+      const label = secs === 1800 ? "30 minutes" : secs === 3600 ? "1 hour" : secs === 10800 ? "3 hours" : secs === 21600 ? "6 hours" : secs === 43200 ? "12 hours" : secs === 86400 ? "24 hours" : `${secs}s`;
+      await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: msgId }).catch(() => null);
+      await bot.answerCallbackQuery(query.id, { text: `✅ Repeat set to every ${label}` });
       return;
     }
 
@@ -1710,7 +1745,7 @@ export function createCommandBot(token: string): TelegramBot {
           buttons.push({ text: btnText, url: btnUrl });
         }
       }
-      const keyboard = buttons.length > 0
+      const postKeyboard = buttons.length > 0
         ? { inline_keyboard: buildButtonRows(buttons) }
         : undefined;
       try {
@@ -1718,16 +1753,27 @@ export function createCommandBot(token: string): TelegramBot {
           await bot.sendPhoto(chatId, state.imageFileId, {
             caption: state.text,
             parse_mode: "HTML",
-            ...(keyboard ? { reply_markup: keyboard } : {}),
+            ...(postKeyboard ? { reply_markup: postKeyboard } : {}),
           });
         } else {
           await bot.sendMessage(chatId, state.text, {
             parse_mode: "HTML",
             disable_web_page_preview: false,
-            ...(keyboard ? { reply_markup: keyboard } : {}),
+            ...(postKeyboard ? { reply_markup: postKeyboard } : {}),
           });
         }
-        await bot.sendMessage(chatId, `✅ <b>Posted!</b>${buttons.length > 0 ? ` ${buttons.length} button(s) included.` : ""}`, { parse_mode: "HTML" });
+        // Save content to broadcast fields so repeat timer can use it
+        const cfg = await getOrCreate(chatId);
+        await db.update(botConfigTable).set({
+          broadcastText: state.text,
+          broadcastImageFileId: state.imageFileId ?? null,
+          broadcastButtons: buttons.length > 0 ? JSON.stringify(buttons) : null,
+          broadcastInterval: null,
+          updatedAt: new Date(),
+        }).where(eq(botConfigTable.id, cfg.id));
+        await bot.sendMessage(chatId,
+          `✅ <b>Posted!</b>${buttons.length > 0 ? ` ${buttons.length} button(s) included.` : ""}\n\n🔁 <b>Set a repeat timer?</b>\nChoose an interval and this post will automatically re-send:`,
+          { parse_mode: "HTML", reply_markup: postRepeatKeyboard() });
       } catch (err) {
         logger.error({ err }, "/post send failed");
         await bot.sendMessage(chatId, `❌ Failed to post. Make sure the bot has permission to send messages in this group.`, { parse_mode: "HTML" });
