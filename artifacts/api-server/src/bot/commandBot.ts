@@ -42,6 +42,8 @@ type PendingState =
   | { step: "await_broadcast_image" }
   | { step: "await_broadcast_buttons" }
   | { step: "await_co_bot_token" }
+  | { step: "await_tier2_min" }
+  | { step: "await_tier3_min" }
   | { step: "await_post_text" }
   | { step: "await_post_image"; text: string }
   | { step: "await_post_buttons"; text: string; imageFileId?: string };
@@ -130,6 +132,9 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
       [
         { text: config.broadcastInterval ? "📢 Broadcast ✅" : "📢 Broadcast", callback_data: "cfg:broadcast" },
         { text: config.coBotToken ? "🤝 Co-Bot ✅" : "🤝 Co-Bot", callback_data: "cfg:cobot" },
+      ],
+      [
+        { text: `🐋 Tiers: $${config.tier2Min ?? 500} / $${config.tier3Min ?? 1000}`, callback_data: "cfg:tiers" },
       ],
       [
         {
@@ -1295,6 +1300,23 @@ export function createCommandBot(token: string): TelegramBot {
       return;
     }
 
+    // Tier thresholds — medium buy and whale thresholds
+    if (data === "cfg:tiers") {
+      const t2 = config.tier2Min ?? 500;
+      const t3 = config.tier3Min ?? 1000;
+      pendingState.set(chatId, { step: "await_tier2_min" });
+      await bot.sendMessage(chatId,
+        `🐋 <b>Buy Tier Thresholds</b>\n\n` +
+        `Controls when buys get the 🐋 <b>Whale</b> or medium label.\n\n` +
+        `Current settings:\n` +
+        `• Medium buy: <b>$${t2}+</b>\n` +
+        `• Whale buy: <b>$${t3}+</b>\n\n` +
+        `<b>Step 1/2</b> — Reply with the <b>medium buy threshold</b> in USD.\nExample: <code>500</code>\n\n` +
+        `(Buys below this amount are labeled "small buy")`,
+        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+      return;
+    }
+
     // Social links flow
     if (data === "cfg:social") {
       pendingState.set(chatId, { step: "await_social_telegram" });
@@ -1682,6 +1704,42 @@ export function createCommandBot(token: string): TelegramBot {
           `❌ That doesn't look like a valid bot token.\n\nFormat: <code>123456789:ABCdef...</code>\n\nGet it from @BotFather.`,
           { parse_mode: "HTML" });
       }
+      return;
+    }
+
+    // ── Tier thresholds step 1: medium buy amount ─────────────────────────────
+    if (state.step === "await_tier2_min") {
+      const raw = (msg.text ?? "").trim();
+      const n = parseFloat(raw);
+      if (isNaN(n) || n <= 0) {
+        await bot.sendMessage(chatId, `❌ Invalid amount. Enter a number like <code>500</code>`, { parse_mode: "HTML" });
+        pendingState.set(chatId, { step: "await_tier2_min" });
+        return;
+      }
+      pendingState.delete(chatId);
+      pendingState.set(chatId, { step: "await_tier3_min" });
+      await db.update(botConfigTable).set({ tier2Min: n, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      await bot.sendMessage(chatId,
+        `✅ Medium buy set to <b>$${n}+</b>\n\n<b>Step 2/2</b> — Reply with the <b>🐋 whale buy threshold</b> in USD.\nExample: <code>1000</code>\n\n(Buys at or above this will show the 🐋 whale label)`,
+        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+      return;
+    }
+
+    // ── Tier thresholds step 2: whale amount ──────────────────────────────────
+    if (state.step === "await_tier3_min") {
+      const raw = (msg.text ?? "").trim();
+      const n = parseFloat(raw);
+      if (isNaN(n) || n <= 0) {
+        await bot.sendMessage(chatId, `❌ Invalid amount. Enter a number like <code>1000</code>`, { parse_mode: "HTML" });
+        pendingState.set(chatId, { step: "await_tier3_min" });
+        return;
+      }
+      pendingState.delete(chatId);
+      const freshCfg = await getOrCreate(chatId);
+      await db.update(botConfigTable).set({ tier3Min: n, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      await bot.sendMessage(chatId,
+        `✅ <b>Buy tiers updated!</b>\n\n• Small buy: <b>below $${freshCfg.tier2Min ?? 500}</b>\n• Medium buy: <b>$${freshCfg.tier2Min ?? 500}+</b>\n• 🐋 Whale: <b>$${n}+</b>`,
+        { parse_mode: "HTML" });
       return;
     }
 

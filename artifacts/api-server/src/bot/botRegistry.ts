@@ -43,15 +43,14 @@ export async function getDexScreenerData(tokenAddress: string): Promise<DexScree
 }
 
 /**
- * Auto-tier based on multiples of the configured min buy.
- * Tier 1 (small):  1× – 9× minBuy
- * Tier 2 (medium): 10× – 49× minBuy
- * Tier 3 (whale):  50×+ minBuy
+ * Tier based on fixed USD thresholds configured per-bot.
+ * Tier 1 (small):  below tier2Min
+ * Tier 2 (medium): tier2Min – tier3Min-1
+ * Tier 3 (whale):  tier3Min+
  */
-function getTier(amountUsd: number, minBuyUsd: number): number {
-  const min = minBuyUsd > 0 ? minBuyUsd : 1;
-  if (amountUsd >= min * 50) return 3; // whale
-  if (amountUsd >= min * 10) return 2; // medium
+function getTier(amountUsd: number, tier2Min: number, tier3Min: number): number {
+  if (amountUsd >= tier3Min) return 3; // whale
+  if (amountUsd >= tier2Min) return 2; // medium
   return 1;                             // small
 }
 
@@ -933,7 +932,7 @@ class BotRegistry {
     const minBuy = config.minBuyUsd ?? 1;
     if (amountUsd < minBuy) return;
 
-    const tier = getTier(amountUsd, minBuy);
+    const tier = getTier(amountUsd, config.tier2Min ?? 500, config.tier3Min ?? 1000);
 
     await db.insert(alertsTable).values({
       botConfigId: configId,
