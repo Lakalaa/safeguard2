@@ -5,7 +5,7 @@ services:
     plan: free
     buildCommand: pnpm install && pnpm --filter @workspace/api-server run build
     startCommand: node --enable-source-maps ./artifacts/api-server/dist/index.mjs
-    healthCheckPath: /api/bots
+    healthCheckPath: /api/healthz
     envVars:
       - key: NODE_ENV
         value: production
