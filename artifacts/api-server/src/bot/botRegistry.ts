@@ -85,6 +85,7 @@ interface AlertParams {
   telegramUrl?: string | null;
   twitterUrl?: string | null;
   websiteUrl?: string | null;
+  emojiPerTier: number;            // how many emojis per tier level (1×, 2×, 3×)
   trendingRank: number | null;     // position in DexScreener boosts leaderboard, null if not trending
   dexPaidScore: number | null;     // total boost amount ("Dex Paid" score), null if 0
 }
@@ -92,9 +93,10 @@ interface AlertParams {
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 function emojiBar(params: AlertParams): string {
   const emoji = params.alertEmoji || "🟢";
-  const minBuy = params.minBuyUsd > 0 ? params.minBuyUsd : 1;
-  const rawCount = Math.floor(params.amountUsd / minBuy);
-  return emoji.repeat(Math.max(1, Math.min(rawCount, 200)));
+  const perTier = Math.max(1, params.emojiPerTier ?? 5);
+  // tier 1 = 1×, tier 2 = 2×, tier 3 = 3×
+  const count = perTier * params.tier;
+  return emoji.repeat(count);
 }
 
 // ── Style 1: SOSANA (default) ──────────────────────────────────────────────────
@@ -955,6 +957,7 @@ class BotRegistry {
       tier,
       minBuyUsd: config.minBuyUsd ?? 1,
       alertEmoji: config.alertEmoji || "🟢",
+      emojiPerTier: config.emojiPerTier ?? 5,
       alertStyle: config.alertStyle ?? "sosana",
       amountUsd,
       amountNative,
