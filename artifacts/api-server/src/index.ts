@@ -28,4 +28,16 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // Keep-alive: ping own healthz every 10 minutes so Render free tier
+  // never spins down due to inactivity (spin-down threshold is 15 min).
+  const selfUrl =
+    process.env["RENDER_EXTERNAL_URL"] ??
+    "https://safeguard-bot-nagr.onrender.com";
+
+  setInterval(() => {
+    fetch(`${selfUrl}/api/healthz`)
+      .then(() => logger.info("keep-alive ping sent"))
+      .catch((e: unknown) => logger.warn({ err: String(e) }, "keep-alive ping failed"));
+  }, 10 * 60 * 1000); // every 10 minutes
 });
