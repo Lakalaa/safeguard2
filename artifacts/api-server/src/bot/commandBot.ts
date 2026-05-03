@@ -27,6 +27,7 @@ type PendingState =
   | { step: "await_emoji_count"; emoji: string }
   | { step: "await_media" }
   | { step: "await_buy_link" }
+  | { step: "await_buy_buttons" }
   | { step: "await_social_telegram" }
   | { step: "await_social_twitter"; telegramUrl: string | null }
   | { step: "await_social_website"; telegramUrl: string | null; twitterUrl: string | null }
@@ -115,6 +116,9 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
       ],
       [
         { text: config.buyUrl ? "🛒 Buy Link ✅" : "🛒 Set Buy Link", callback_data: "cfg:buy" },
+        { text: config.buyButtons ? "🔗 Buy Buttons ✅" : "🔗 Buy Buttons", callback_data: "cfg:buy:buttons" },
+      ],
+      [
         { text: `💵 Min: $${min}`, callback_data: "cfg:min" },
       ],
       [
@@ -984,6 +988,16 @@ export function createCommandBot(token: string): TelegramBot {
       return;
     }
 
+    // Buy alert custom buttons
+    if (data === "cfg:buy:buttons") {
+      pendingState.set(chatId, { step: "await_buy_buttons" });
+      await bot.sendMessage(chatId,
+        `🔗 <b>Buy Alert Custom Buttons</b>\n\nAdd extra inline buttons that appear below every buy alert.\n\nSend one button per line:\n<code>Button Text | https://link.com</code>\n\nExample:\n<code>🗳 Vote Now | https://coinvote.cc/token/HORNY\n🔥 Trending | https://dexscreener.com\n📢 Telegram | https://t.me/yourchat</code>\n\nUp to 8 buttons, shown 2 per row.\nSend <code>clear</code> to remove all buttons.`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
     // Alert style picker
     if (data === "cfg:style") {
       const current = config.alertStyle ?? "sosana";
@@ -1455,6 +1469,40 @@ export function createCommandBot(token: string): TelegramBot {
         .where(eq(botConfigTable.id, config.id));
       await bot.sendMessage(chatId, "✅ Buy link saved.");
       const updated = await getOrCreate(chatId);
+      const { running } = botRegistry.getStatus(updated.id);
+      await sendSettings(bot, chatId, updated, running);
+      return;
+    }
+
+    // ── Buy alert custom buttons ───────────────────────────────────────────
+    if (state.step === "await_buy_buttons") {
+      const rawText = (msg.text ?? "").trim();
+      if (rawText.toLowerCase() === "clear") {
+        pendingState.delete(chatId);
+        await db.update(botConfigTable).set({ buyButtons: null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+        const updated = await getOrCreate(chatId);
+        await bot.sendMessage(chatId, `✅ Buy alert buttons cleared.`, { parse_mode: "HTML" });
+        const { running } = botRegistry.getStatus(updated.id);
+        await sendSettings(bot, chatId, updated, running);
+        return;
+      }
+      const lines = rawText.split("\n").filter(Boolean).slice(0, 8);
+      const buttons: { text: string; url: string }[] = [];
+      for (const line of lines) {
+        const [btnText, btnUrl] = line.split("|").map((s) => s.trim());
+        if (!btnText || !btnUrl || !btnUrl.startsWith("http")) {
+          await bot.sendMessage(chatId,
+            `❌ Invalid line: <code>${line}</code>\nFormat must be: <code>Button Text | https://url.com</code>`,
+            { parse_mode: "HTML" },
+          );
+          return;
+        }
+        buttons.push({ text: btnText, url: btnUrl });
+      }
+      pendingState.delete(chatId);
+      await db.update(botConfigTable).set({ buyButtons: JSON.stringify(buttons), updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      const updated = await getOrCreate(chatId);
+      await bot.sendMessage(chatId, `✅ ${buttons.length} button(s) saved. They'll appear on every buy alert.`, { parse_mode: "HTML" });
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running);
       return;
