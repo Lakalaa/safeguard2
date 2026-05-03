@@ -281,16 +281,13 @@ function buildRaidMessage(
   tweetUrl: string,
   config: BotConfig,
 ): { text: string; keyboard: TelegramBot.InlineKeyboardMarkup } {
-  const name = config.tokenName ?? config.tokenSymbol ?? "Token";
-
-  function statLine(emoji: string, label: string, current: number, target: number): string {
+  function statLine(label: string, current: number, target: number): string {
     if (target <= 0) return "";
     const pct = Math.min(100, Math.round((current / target) * 100));
     const reached = current >= target;
-    const bar = progressBar(current, target);
-    const badge = reached ? "✅" : `${pct}%`;
-    const pad = label.padEnd(8);
-    return `${emoji} ${pad} <code>${bar}</code> <b>${current}</b>/<b>${target}</b> [${badge}]`;
+    const square = reached ? "🟩" : "🟥";
+    const badge = reached ? "💯%" : `${pct}%`;
+    return `${square} ${label} ${current} | ${target} [${badge}]`;
   }
 
   const allDone =
@@ -299,15 +296,13 @@ function buildRaidMessage(
     metrics.replies >= targets.replies;
 
   const lines: string[] = [
-    `🚨 <b>RAID ALERT</b> 🚨`,
-    ``,
-    `📣 <b>${name}</b> needs your support — raid NOW!`,
+    `⚡ <b>Raid Tweet</b>`,
     ``,
   ];
 
-  const l = statLine("❤️", "Likes", metrics.likes, targets.likes);
-  const r = statLine("🔁", "Retweets", metrics.retweets, targets.retweets);
-  const rep = statLine("💬", "Replies", metrics.replies, targets.replies);
+  const l = statLine("Likes", metrics.likes, targets.likes);
+  const r = statLine("Retweets", metrics.retweets, targets.retweets);
+  const rep = statLine("Replies", metrics.replies, targets.replies);
   if (l) lines.push(l);
   if (r) lines.push(r);
   if (rep) lines.push(rep);
@@ -315,9 +310,12 @@ function buildRaidMessage(
   lines.push(``);
   if (allDone) {
     lines.push(`🔥 <b>ALL TARGETS CRUSHED — LFG! 🚀</b>`);
-  } else {
-    lines.push(`⚡ <b>Push it — every engagement counts!</b>`);
+    lines.push(``);
   }
+
+  lines.push(tweetUrl);
+  lines.push(``);
+  lines.push(`🔥 <b>Trending</b>`);
 
   const keyboard: TelegramBot.InlineKeyboardMarkup = {
     inline_keyboard: [[{ text: "🐦 RAID THE TWEET →", url: tweetUrl }]],
@@ -810,15 +808,15 @@ class BotRegistry {
       const { text: built } = buildRaidMessage(metrics, targets, config.raidTweetUrl, config);
       text = built;
     } else {
-      // Twitter API unavailable — post a static call-to-action
+      // Twitter API unavailable — post a static call-to-action with URL for preview
       text = [
-        `🚨 <b>RAID ALERT</b> 🚨`,
-        ``,
-        `📣 <b>${name}</b> needs your support — raid NOW!`,
+        `⚡ <b>Raid Tweet</b>`,
         ``,
         `❤️ Like  •  🔁 Retweet  •  💬 Reply`,
         ``,
-        `⚡ <b>Every engagement counts — go push the tweet!</b>`,
+        config.raidTweetUrl,
+        ``,
+        `🔥 <b>Trending</b>`,
       ].join("\n");
     }
 
@@ -827,7 +825,6 @@ class BotRegistry {
       const tgBot = new TelegramBot(tk, { polling: false });
       await tgBot.sendMessage(config.chatId, text, {
         parse_mode: "HTML",
-        disable_web_page_preview: true,
         reply_markup: keyboard,
       }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot raid message failed"));
     }
