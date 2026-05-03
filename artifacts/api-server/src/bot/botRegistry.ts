@@ -82,6 +82,7 @@ interface AlertParams {
   screenerUrl?: string | null;
   buyUrl?: string | null;
   trendingUrl?: string | null;
+  buyButtons?: string | null;      // JSON: [{text,url}] extra inline buttons on buy alert
   telegramUrl?: string | null;
   twitterUrl?: string | null;
   websiteUrl?: string | null;
@@ -142,8 +143,8 @@ function buildSosanaMessage(params: AlertParams): string {
   );
 }
 
-function buildSosanaKeyboard(_params: AlertParams): TelegramBot.InlineKeyboardMarkup {
-  return { inline_keyboard: [] };
+function buildSosanaKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
+  return buildCustomButtonRows(params);
 }
 
 // ── Style 2: Trending ──────────────────────────────────────────────────────────
@@ -199,13 +200,28 @@ function buildTrendingMessage(params: AlertParams): string {
   );
 }
 
+function buildCustomButtonRows(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
+  if (!params.buyButtons) return { inline_keyboard: [] };
+  try {
+    const extra = JSON.parse(params.buyButtons) as { text: string; url: string }[];
+    if (!extra.length) return { inline_keyboard: [] };
+    const rows: TelegramBot.InlineKeyboardButton[][] = [];
+    for (let i = 0; i < extra.length; i += 2) {
+      rows.push(extra.slice(i, i + 2).map((b) => ({ text: b.text, url: b.url })));
+    }
+    return { inline_keyboard: rows };
+  } catch { return { inline_keyboard: [] }; }
+}
+
 function buildTrendingKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
-  const buttons: TelegramBot.InlineKeyboardButton[] = [];
-  if (params.buyUrl) buttons.push({ text: "🛒 Buy", url: params.buyUrl });
-  if (params.dextUrl) buttons.push({ text: "📊 DexTools", url: params.dextUrl });
-  if (params.screenerUrl) buttons.push({ text: "📈 Screener", url: params.screenerUrl });
-  if (params.trendingUrl) buttons.push({ text: "🔥 Trending", url: params.trendingUrl });
-  return buttons.length > 0 ? { inline_keyboard: [buttons] } : { inline_keyboard: [] };
+  const fixedRow: TelegramBot.InlineKeyboardButton[] = [];
+  if (params.buyUrl) fixedRow.push({ text: "🛒 Buy", url: params.buyUrl });
+  if (params.dextUrl) fixedRow.push({ text: "📊 DexTools", url: params.dextUrl });
+  if (params.screenerUrl) fixedRow.push({ text: "📈 Screener", url: params.screenerUrl });
+  if (params.trendingUrl) fixedRow.push({ text: "🔥 Trending", url: params.trendingUrl });
+  const extraRows = buildCustomButtonRows(params).inline_keyboard;
+  const rows = [...(fixedRow.length > 0 ? [fixedRow] : []), ...extraRows];
+  return { inline_keyboard: rows };
 }
 
 // ── Dispatcher ─────────────────────────────────────────────────────────────────
@@ -970,6 +986,7 @@ class BotRegistry {
       screenerUrl: config.screenerUrl,
       buyUrl: config.buyUrl,
       trendingUrl: config.trendingUrl,
+      buyButtons: config.buyButtons,
       telegramUrl: config.telegramUrl,
       twitterUrl: config.twitterUrl,
       websiteUrl: config.websiteUrl,
