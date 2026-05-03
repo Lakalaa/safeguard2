@@ -43,6 +43,10 @@ function toBotDetail(config: BotConfig, running: boolean, lastCheckAt: Date | nu
     screenerUrl: config.screenerUrl ?? null,
     buyUrl: config.buyUrl ?? null,
     trendingUrl: config.trendingUrl ?? null,
+    alertEmoji: config.alertEmoji,
+    alertStyle: config.alertStyle ?? "sosana",
+    alertMediaType: config.alertMediaType ?? null,
+    alertMediaFileId: config.alertMediaFileId ?? null,
     emojiPerTier: config.emojiPerTier,
     tier1Min: config.tier1Min,
     tier2Min: config.tier2Min,
@@ -72,6 +76,10 @@ function applyInput(body: ReturnType<typeof CreateBotBody.parse>): Partial<BotCo
   if (body.tier1Min !== undefined && body.tier1Min !== null) updates.tier1Min = body.tier1Min;
   if (body.tier2Min !== undefined && body.tier2Min !== null) updates.tier2Min = body.tier2Min;
   if (body.tier3Min !== undefined && body.tier3Min !== null) updates.tier3Min = body.tier3Min;
+  if (body.alertEmoji !== undefined) updates.alertEmoji = body.alertEmoji;
+  if (body.alertStyle !== undefined) updates.alertStyle = body.alertStyle;
+  if (body.alertMediaType !== undefined) updates.alertMediaType = body.alertMediaType;
+  if (body.alertMediaFileId !== undefined) updates.alertMediaFileId = body.alertMediaFileId;
   return updates;
 }
 
