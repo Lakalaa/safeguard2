@@ -123,13 +123,6 @@ function buildSosanaMessage(params: AlertParams): string {
     ? `\n💰 Market Cap <b>$${Math.round(params.marketCap).toLocaleString("en-US")}</b>`
     : "";
 
-  const linkParts: string[] = [];
-  if (params.dextUrl) linkParts.push(`<a href="${params.dextUrl}">DexT</a>`);
-  if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
-  if (params.buyUrl) linkParts.push(`<a href="${params.buyUrl}">Buy</a>`);
-  if (params.trendingUrl) linkParts.push(`<a href="${params.trendingUrl}">Trending</a>`);
-  const linksLine = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
-
   return (
     `<b>${params.tokenName} ${buyLabel}</b>` +
     trendingLine + `\n` +
@@ -138,13 +131,19 @@ function buildSosanaMessage(params: AlertParams): string {
     `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `👤 <a href="${buyerUrl}">Buyer</a> / <a href="${txUrl}">TX</a>` +
     positionLine +
-    mcapLine +
-    linksLine
+    mcapLine
   );
 }
 
 function buildSosanaKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
-  return buildCustomButtonRows(params);
+  const fixedRow: TelegramBot.InlineKeyboardButton[] = [];
+  if (params.buyUrl) fixedRow.push({ text: "🛒 Buy", url: params.buyUrl });
+  if (params.dextUrl) fixedRow.push({ text: "📊 DexTools", url: params.dextUrl });
+  if (params.screenerUrl) fixedRow.push({ text: "📈 Screener", url: params.screenerUrl });
+  if (params.trendingUrl) fixedRow.push({ text: "🔥 Trending", url: params.trendingUrl });
+  const extraRows = buildCustomButtonRows(params).inline_keyboard;
+  const rows = [...(fixedRow.length > 0 ? [fixedRow] : []), ...extraRows];
+  return { inline_keyboard: rows };
 }
 
 // ── Style 2: Trending ──────────────────────────────────────────────────────────
