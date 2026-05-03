@@ -26,6 +26,7 @@ export const botConfigTable = pgTable("bot_config", {
   screenerUrl: text("screener_url"),
   buyUrl: text("buy_url"),
   trendingUrl: text("trending_url"),
+  buyButtons: text("buy_buttons"), // JSON: [{text,url}] extra inline buttons on buy alert
   emojiPerTier: integer("emoji_per_tier").notNull().default(4),
   alertEmoji: text("alert_emoji").notNull().default("🟢"),
   alertMediaFileId: text("alert_media_file_id"),
