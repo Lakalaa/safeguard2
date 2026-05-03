@@ -214,6 +214,10 @@ components:
         chain: { type: string, nullable: true }
         minBuyUsd: { type: number, nullable: true }
         alertImageUrl: { type: string, nullable: true }
+        alertEmoji: { type: string, nullable: true }
+        alertStyle: { type: string, nullable: true }
+        alertMediaType: { type: string, nullable: true }
+        alertMediaFileId: { type: string, nullable: true }
         dextUrl: { type: string, nullable: true }
         screenerUrl: { type: string, nullable: true }
         buyUrl: { type: string, nullable: true }
@@ -238,6 +242,10 @@ components:
         chain: { type: string, nullable: true }
         minBuyUsd: { type: number }
         alertImageUrl: { type: string, nullable: true }
+        alertEmoji: { type: string, nullable: true }
+        alertStyle: { type: string, nullable: true }
+        alertMediaType: { type: string, nullable: true }
+        alertMediaFileId: { type: string, nullable: true }
         dextUrl: { type: string, nullable: true }
         screenerUrl: { type: string, nullable: true }
         buyUrl: { type: string, nullable: true }
