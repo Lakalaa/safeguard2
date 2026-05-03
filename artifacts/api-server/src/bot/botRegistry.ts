@@ -1033,69 +1033,19 @@ class BotRegistry {
 
     try {
       const tgBot = new TelegramBot(token, { polling: false });
+      const tokenName = config.tokenName ?? "your token";
       const chainId = config.chain ?? "solana";
       const chainConfig = getChainConfig(chainId);
       const chainName = chainConfig?.name ?? chainId;
 
-      // Fetch live DEX data for a realistic preview
-      const dexData = config.tokenAddress ? await getDexScreenerData(config.tokenAddress) : null;
-      const marketCap = dexData?.marketCap ?? dexData?.fdv ?? null;
-      const priceChangePct = dexData?.priceChange?.h24 ?? null;
+      const msg =
+        `✅ <b>Bot connected successfully!</b>\n\n` +
+        `Monitoring: <b>${tokenName}</b> on <b>${chainName}</b>\n` +
+        `Min buy: <b>$${config.minBuyUsd ?? 1}</b>\n\n` +
+        `Real buy alerts will appear here as they happen on-chain.`;
 
-      const alertParams: AlertParams = {
-        tokenName: config.tokenName ?? dexData?.baseToken.name ?? "Token",
-        tokenSymbol: config.tokenSymbol ?? dexData?.baseToken.symbol ?? "TKN",
-        chainName,
-        tier: 1,
-        minBuyUsd: config.minBuyUsd ?? 1,
-        alertEmoji: config.alertEmoji || "🟢",
-        emojiPerTier: config.emojiPerTier ?? 5,
-        alertStyle: config.alertStyle ?? "sosana",
-        amountUsd: 33.31,
-        amountNative: 0.394,
-        nativeCurrency: chainConfig?.nativeCurrency ?? "SOL",
-        tokensReceived: 119000,
-        buyerAddress: "5oNDL3swdV1wNBsoRaVSuFAqHAJHXTroFPGQR3BGubfd",
-        txSignature: "testtx1234567890",
-        explorerTx: chainConfig?.explorerTx ?? "https://solscan.io/tx/{tx}",
-        explorerAddress: chainConfig?.explorerAddress ?? "https://solscan.io/account/{address}",
-        marketCap,
-        priceChangePct,
-        dextUrl: config.dextUrl,
-        screenerUrl: config.screenerUrl,
-        buyUrl: config.buyUrl,
-        trendingUrl: config.trendingUrl,
-        telegramUrl: config.telegramUrl,
-        twitterUrl: config.twitterUrl,
-        websiteUrl: config.websiteUrl,
-        trendingRank: null,
-        dexPaidScore: null,
-      };
-
-      const message = buildAlertMessage(alertParams);
-      const keyboard = buildAlertKeyboard(alertParams);
-      const mediaFileId = config.alertMediaFileId;
-      const mediaType = config.alertMediaType ?? "photo";
-      const mediaUrl = config.alertImageUrl;
-
-      if (mediaFileId || mediaUrl) {
-        const mediaSrc = (mediaFileId ?? mediaUrl) as string;
-        const mediaOpts = { caption: message, parse_mode: "HTML" as const, reply_markup: keyboard };
-        if (mediaType === "video") {
-          await tgBot.sendVideo(config.chatId, mediaSrc, mediaOpts);
-        } else if (mediaType === "animation") {
-          await tgBot.sendAnimation(config.chatId, mediaSrc, mediaOpts);
-        } else {
-          await tgBot.sendPhoto(config.chatId, mediaSrc, mediaOpts);
-        }
-      } else {
-        await tgBot.sendMessage(config.chatId, message, {
-          parse_mode: "HTML",
-          disable_web_page_preview: true,
-          reply_markup: keyboard,
-        });
-      }
-      return { success: true, message: "Test alert sent!" };
+      await tgBot.sendMessage(config.chatId, msg, { parse_mode: "HTML" });
+      return { success: true, message: "Connection verified! Bot is ready." };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return { success: false, message: msg };
