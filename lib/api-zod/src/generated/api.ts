@@ -274,3 +274,34 @@ export const GetTokenInfoResponse = zod.object({
   chainId: zod.string().nullish(),
   found: zod.boolean(),
 });
+
+export const listAlertsQueryLimitDefault = 50;
+
+export const ListAlertsQueryParams = zod.object({
+  limit: zod.coerce.number().default(listAlertsQueryLimitDefault),
+});
+
+export const ListAlertsResponseItem = zod.object({
+  id: zod.number(),
+  botConfigId: zod.number().nullish(),
+  txSignature: zod.string().nullish(),
+  chain: zod.string(),
+  buyerAddress: zod.string(),
+  amountUsd: zod.number(),
+  amountNative: zod.number(),
+  nativeCurrency: zod.string(),
+  tokensReceived: zod.number(),
+  marketCap: zod.number().nullish(),
+  priceChangePct: zod.number().nullish(),
+  tier: zod.number(),
+  sentAt: zod.coerce.date(),
+});
+export const ListAlertsResponse = zod.array(ListAlertsResponseItem);
+
+export const GetStatsResponse = zod.object({
+  totalAlerts: zod.number(),
+  totalVolumeUsd: zod.number(),
+  avgBuyUsd: zod.number(),
+  biggestBuyUsd: zod.number(),
+  alertsToday: zod.number(),
+});
