@@ -851,7 +851,7 @@ export function createCommandBot(token: string): TelegramBot {
       }
       pendingState.set(chatId, { step: "await_filter_buttons", commandName, messageText: cmd.messageText });
       await bot.sendMessage(chatId,
-        `➕ Adding buttons to <code>/${commandName}</code>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://horny.xyz</code>\n<code>🛒 Buy | https://jup.ag</code>\n<code>📊 Chart | https://dexscreener.com/...</code>\n\nUp to 8 buttons, displayed 2 per row.`,
+        `➕ Adding buttons to <code>/${commandName}</code>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://horny.xyz</code>\n<code>🛒 Buy | https://jup.ag</code>\n<code>📊 Chart | https://dexscreener.com/...</code>\n\nAdd as many buttons as you want, shown 2 per row.`,
         { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
       return;
     }
@@ -992,7 +992,7 @@ export function createCommandBot(token: string): TelegramBot {
     if (data === "cfg:buy:buttons") {
       pendingState.set(chatId, { step: "await_buy_buttons" });
       await bot.sendMessage(chatId,
-        `🔗 <b>Buy Alert Custom Buttons</b>\n\nAdd extra inline buttons that appear below every buy alert.\n\nSend one button per line:\n<code>Button Text | https://link.com</code>\n\nExample:\n<code>🗳 Vote Now | https://coinvote.cc/token/HORNY\n🔥 Trending | https://dexscreener.com\n📢 Telegram | https://t.me/yourchat</code>\n\nUp to 8 buttons, shown 2 per row.\nSend <code>clear</code> to remove all buttons.`,
+        `🔗 <b>Buy Alert Custom Buttons</b>\n\nAdd extra inline buttons that appear below every buy alert.\n\nSend one button per line:\n<code>Button Text | https://link.com</code>\n\nExample:\n<code>🗳 Vote Now | https://coinvote.cc/token/HORNY\n🔥 Trending | https://dexscreener.com\n📢 Telegram | https://t.me/yourchat</code>\n\nAdd as many buttons as you want, shown 2 per row.\nSend <code>clear</code> to remove all buttons.`,
         { parse_mode: "HTML" },
       );
       return;
@@ -1173,7 +1173,7 @@ export function createCommandBot(token: string): TelegramBot {
     if (data === "cfg:vote:buttons") {
       pendingState.set(chatId, { step: "await_vote_buttons" });
       await bot.sendMessage(chatId,
-        `🔗 <b>Custom Buttons</b>\n\nSend one button per line in this format:\n<code>Button Text | https://link.com</code>\n\nExample:\n<code>🗳 Vote for TOKEN | https://coinvote.cc/token/TOKEN\n🎰 Create Raffle | https://t.me/rafflebot\n⚡ Boost Votes | https://example.com\n🔥 Buy Trending | https://dexscreener.com</code>\n\nUp to 8 buttons, shown 2 per row. Send <code>clear</code> to remove all buttons.`,
+        `🔗 <b>Custom Buttons</b>\n\nSend one button per line in this format:\n<code>Button Text | https://link.com</code>\n\nExample:\n<code>🗳 Vote for TOKEN | https://coinvote.cc/token/TOKEN\n🎰 Create Raffle | https://t.me/rafflebot\n⚡ Boost Votes | https://example.com\n🔥 Buy Trending | https://dexscreener.com</code>\n\nAdd as many buttons as you want, shown 2 per row. Send <code>clear</code> to remove all buttons.`,
         { parse_mode: "HTML" },
       );
       return;
@@ -1225,7 +1225,7 @@ export function createCommandBot(token: string): TelegramBot {
       if (data === "cfg:broadcast:buttons") {
         pendingState.set(chatId, { step: "await_broadcast_buttons" });
         await bot.sendMessage(chatId,
-          `🔗 <b>Broadcast Buttons</b>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://horny.xyz</code>\n<code>🛒 Buy Now | https://jup.ag</code>\n<code>📊 Chart | https://dexscreener.com/...</code>\n\nUp to 8 buttons, 2 per row. Send <code>clear</code> to remove all.`,
+          `🔗 <b>Broadcast Buttons</b>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://horny.xyz</code>\n<code>🛒 Buy Now | https://jup.ag</code>\n<code>📊 Chart | https://dexscreener.com/...</code>\n\nAdd as many buttons as you want, 2 per row. Send <code>clear</code> to remove all.`,
           { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
         return;
       }
@@ -1486,7 +1486,7 @@ export function createCommandBot(token: string): TelegramBot {
         await sendSettings(bot, chatId, updated, running);
         return;
       }
-      const lines = rawText.split("\n").filter(Boolean).slice(0, 8);
+      const lines = rawText.split("\n").filter(Boolean);
       const buttons: { text: string; url: string }[] = [];
       for (const line of lines) {
         const [btnText, btnUrl] = line.split("|").map((s) => s.trim());
@@ -1628,7 +1628,7 @@ export function createCommandBot(token: string): TelegramBot {
         await bot.sendMessage(chatId, "Back to Vote settings:", { parse_mode: "HTML", reply_markup: voteMenuKeyboard(updated) });
         return;
       }
-      const lines = rawText.split("\n").filter(Boolean).slice(0, 8);
+      const lines = rawText.split("\n").filter(Boolean);
       const buttons: { text: string; url: string }[] = [];
       for (const line of lines) {
         const [btnText, btnUrl] = line.split("|").map((s) => s.trim());
@@ -1695,7 +1695,7 @@ export function createCommandBot(token: string): TelegramBot {
         await bot.sendMessage(chatId, `🗑 Broadcast buttons cleared.`, { parse_mode: "HTML", reply_markup: broadcastKeyboard(updated) });
         return;
       }
-      const lines = rawText.split("\n").filter(Boolean).slice(0, 8);
+      const lines = rawText.split("\n").filter(Boolean);
       const buttons: { text: string; url: string }[] = [];
       for (const line of lines) {
         const parts = line.split("|").map(s => s.trim());
@@ -1826,7 +1826,7 @@ export function createCommandBot(token: string): TelegramBot {
       pendingState.delete(chatId);
       pendingState.set(chatId, { step: "await_post_buttons", text: state.text, imageFileId });
       await bot.sendMessage(chatId,
-        `${imageFileId ? "✅ Image saved!\n\n" : ""}🔗 <b>Add Buttons?</b>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://example.com</code>\n<code>🛒 Buy Now | https://jup.ag/...</code>\n\nUp to 8 buttons, displayed 2 per row.\n\nOr send <code>skip</code> to post without buttons.`,
+        `${imageFileId ? "✅ Image saved!\n\n" : ""}🔗 <b>Add Buttons?</b>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://example.com</code>\n<code>🛒 Buy Now | https://jup.ag/...</code>\n\nAdd as many buttons as you want, displayed 2 per row.\n\nOr send <code>skip</code> to post without buttons.`,
         { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
       return;
     }
@@ -1837,7 +1837,7 @@ export function createCommandBot(token: string): TelegramBot {
       pendingState.delete(chatId);
       let buttons: { text: string; url: string }[] = [];
       if (rawText.toLowerCase() !== "skip") {
-        const lines = rawText.split("\n").filter(Boolean).slice(0, 8);
+        const lines = rawText.split("\n").filter(Boolean);
         for (const line of lines) {
           const parts = line.split("|").map((s) => s.trim());
           const btnText = parts[0];
@@ -1893,7 +1893,7 @@ export function createCommandBot(token: string): TelegramBot {
       const rawText = (msg.text ?? "").trim();
       const { commandName, messageText } = state;
 
-      const lines = rawText.split("\n").filter(Boolean).slice(0, 8);
+      const lines = rawText.split("\n").filter(Boolean);
       const buttons: { text: string; url: string }[] = [];
       for (const line of lines) {
         const parts = line.split("|").map((s) => s.trim());
