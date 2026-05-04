@@ -127,7 +127,7 @@ function buildSosanaMessage(params: AlertParams): string {
   if (params.dextUrl) linkParts.push(`<a href="${params.dextUrl}">DexT</a>`);
   if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   if (params.buyUrl) linkParts.push(`<a href="${params.buyUrl}">Buy</a>`);
-  if (params.trendingUrl) linkParts.push(`<a href="${params.trendingUrl}">Trending</a>`);
+  if (params.trendingUrl && params.trendingRank !== null) linkParts.push(`<a href="${params.trendingUrl}">🔥 Trending #${params.trendingRank}</a>`);
   const linksLine = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
   return (
