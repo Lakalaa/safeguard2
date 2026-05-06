@@ -852,6 +852,60 @@ export function createCommandBot(token: string): TelegramBot {
     await sendSettings(bot, chatId, config, running);
   });
 
+  // ── /box — user info card (any user, read-only) ────────────────────────────
+  // Shows configured token info + all /filter custom commands
+  bot.onText(/^\/box(@\S+)?$/, async (msg) => {
+    if (!msg.from) return;
+    const chatId = String(msg.chat.id);
+    const config = await getOrCreate(chatId, msg.chat.title).catch(() => null);
+    if (!config) return;
+
+    const name = config.tokenName ?? "Token";
+    const symbol = config.tokenSymbol ?? "";
+    const chain = CHAIN_LABELS[config.chain ?? ""] ?? config.chain ?? "";
+
+    const lines: string[] = [];
+    lines.push(`📊 <b>${name}${symbol ? " (" + symbol + ")" : ""}</b>`);
+    if (chain) lines.push(`⛓ ${chain}`);
+    if (config.tokenAddress) lines.push(`📍 <code>${config.tokenAddress}</code>`);
+
+    const linkParts: string[] = [];
+    if (config.buyUrl) {
+      try {
+        const parsed = JSON.parse(config.buyUrl) as { text: string; url: string };
+        linkParts.push(`<a href="${parsed.url}">${parsed.text || "Buy"}</a>`);
+      } catch { linkParts.push(`<a href="${config.buyUrl}">Buy</a>`); }
+    }
+    if (config.dextUrl) linkParts.push(`<a href="${config.dextUrl}">DexTools</a>`);
+    if (config.screenerUrl) linkParts.push(`<a href="${config.screenerUrl}">DexScreener</a>`);
+    if (config.websiteUrl) linkParts.push(`<a href="${config.websiteUrl}">Website</a>`);
+    if (config.telegramUrl) linkParts.push(`<a href="${config.telegramUrl}">Telegram</a>`);
+    if (config.twitterUrl) linkParts.push(`<a href="${config.twitterUrl}">Twitter</a>`);
+    if (linkParts.length > 0) lines.push("\n" + linkParts.join(" | "));
+
+    // Custom commands from /filter
+    const cmds = await db.select().from(customCommandsTable)
+      .where(eq(customCommandsTable.botConfigId, config.id))
+      .orderBy(customCommandsTable.commandName)
+      .catch(() => []);
+    if (cmds.length > 0) {
+      lines.push("\n📋 <b>Commands</b>");
+      for (const c of cmds) {
+        lines.push(`• /<code>${c.commandName}</code> — ${c.messageText.length > 60 ? c.messageText.slice(0, 57) + "…" : c.messageText}`);
+      }
+    }
+
+    if (lines.length <= 1 && !config.tokenAddress) {
+      await bot.sendMessage(chatId, "ℹ️ No token info configured yet.");
+      return;
+    }
+
+    await bot.sendMessage(chatId, lines.join("\n"), {
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+    }).catch(() => null);
+  });
+
   // ── /diag — API diagnostic: shows exactly which sources work from Render ─
   bot.onText(/^\/diag(@\S+)?$/, async (msg) => {
     if (!msg.from) return;
@@ -2072,7 +2126,7 @@ Send <code>clear</code> to remove the buy link.`,
     const commandName = rawName.toLowerCase();
 
     // Skip built-in bot commands so they don't also fire here
-    const builtIn = new Set(["start","stop","status","add","token","setup","filter"]);
+    const builtIn = new Set(["start","stop","status","add","token","setup","filter","box"]);
     if (builtIn.has(commandName)) return;
 
     const config = await getOrCreate(chatId).catch(() => null);
