@@ -111,6 +111,40 @@ function emojiBar(params: AlertParams): string {
   return emoji.repeat(count);
 }
 
+// Wave animation frames: sweeps ⚡ left→center→right then back to static
+function waveEmojiFrames(emoji: string, count: number): string[] {
+  const full = emoji.repeat(count);
+  if (count <= 2) return [full, full, full, full, full];
+  function frame(litStart: number, litLen: number): string {
+    const arr = Array(count).fill(emoji);
+    for (let i = litStart; i < Math.min(litStart + litLen, count); i++) arr[i] = "⚡";
+    return arr.join("");
+  }
+  const third = Math.max(1, Math.ceil(count / 3));
+  return [
+    full,                              // Frame 1 – initial send
+    frame(0, third),                   // Frame 2 – left lights up
+    frame(third, third),               // Frame 3 – middle
+    frame(count - third, third),       // Frame 4 – right
+    full,                              // Frame 5 – settle back
+  ];
+}
+
+// Chain-specific emoji for EVM style
+function chainEmoji(chainName: string): string {
+  const n = (chainName || "").toLowerCase();
+  if (n.includes("ethereum") || n === "eth") return "⟠";
+  if (n.includes("bsc") || n.includes("binance")) return "🔶";
+  if (n.includes("arbitrum")) return "🔷";
+  if (n.includes("polygon") || n.includes("matic")) return "🟣";
+  if (n.includes("optimism")) return "🔴";
+  if (n.includes("base")) return "🔵";
+  if (n.includes("solana") || n === "sol") return "◎";
+  if (n.includes("avalanche") || n.includes("avax")) return "🔺";
+  if (n.includes("fantom")) return "🌐";
+  return "🔗";
+}
+
 // ── Style 1: SOSANA (default) ──────────────────────────────────────────────────
 // Clean, text-link format matching the SOSANA/BOBO reference look.
 function buildSosanaMessage(params: AlertParams): string {
@@ -162,6 +196,101 @@ function buildSosanaKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMar
   if (trendingHref) rows.push([{ text: "🔥 Trending", url: trendingHref }]);
   rows.push(...extraRows);
   return { inline_keyboard: rows };
+}
+
+// ── Style 3: Wave (animated) ────────────────────────────────────────────────────
+// Same layout as SOSANA but emoji bar animates after sending.
+// buildWaveMessage accepts an optional emojiBarStr to override for animation frames.
+function buildWaveMessage(params: AlertParams, emojiBarStr?: string): string {
+  const buyLabel = params.tier === 3 ? "🐋 Whale Buy!" : "Buy!";
+  const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
+  const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
+  const bar = emojiBarStr ?? emojiBar(params);
+
+  const trendingLine = params.trendingRank !== null
+    ? `\n📡 Trending #${params.trendingRank}`
+    : "";
+  const nativeStr = params.amountNative > 0
+    ? ` (${params.amountNative.toFixed(3)} ${params.nativeCurrency})`
+    : "";
+  const positionLine = params.priceChangePct !== null
+    ? `\n🪙 Position <b>${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(0)}%</b>`
+    : "";
+  const mcapLine = params.marketCap !== null
+    ? `\n💰 Market Cap <b>${Math.round(params.marketCap).toLocaleString("en-US")}</b>`
+    : "";
+  const linkParts: string[] = [];
+  if (params.dextUrl) linkParts.push(`<a href="${params.dextUrl}">DexTools</a>`);
+  if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
+  const _wBuyLink = parseBuyLink(params.buyUrl);
+  if (_wBuyLink) linkParts.push(`<a href="${_wBuyLink.url}">${_wBuyLink.text}</a>`);
+  if (params.trendingUrl && params.trendingRank !== null) linkParts.push(`<a href="${params.trendingUrl}">🔥 Trending #${params.trendingRank}</a>`);
+  const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
+
+  return (
+    `<b>${params.tokenName} ${buyLabel}</b>` +
+    trendingLine + `\n` +
+    `${bar}\n\n` +
+    `🔀 Spent <b>${formatNumber(params.amountUsd)}</b>${nativeStr}\n` +
+    `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
+    `👤 <a href="${buyerUrl}">Buyer</a> / <a href="${txUrl}">TX</a>` +
+    positionLine + mcapLine + linksFooter
+  );
+}
+
+function buildWaveKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
+  return buildSosanaKeyboard(params);
+}
+
+// ── Style 4: EVM ────────────────────────────────────────────────────────────────
+// Chain-aware format: shows chain emoji, hex address, EVM styling.
+function buildEvmMessage(params: AlertParams): string {
+  const cEmoji = chainEmoji(params.chainName);
+  const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
+  const txUrl    = params.explorerTx.replace("{tx}", params.txSignature);
+  const shortAddr = params.buyerAddress.length > 10
+    ? `${params.buyerAddress.slice(0, 6)}…${params.buyerAddress.slice(-4)}`
+    : params.buyerAddress;
+  const buyLabel = params.tier === 3 ? "🐋 Whale Buy!" : "Buy!";
+
+  const trendingLine = params.trendingRank !== null ? `\n📡 Trending #${params.trendingRank}` : "";
+  const nativeStr = params.amountNative > 0
+    ? `${params.amountNative.toFixed(4)} ${params.nativeCurrency} (${formatNumber(params.amountUsd)})`
+    : formatNumber(params.amountUsd);
+  const positionLine = params.priceChangePct !== null
+    ? `\n📈 Position: <b>${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(1)}%</b>`
+    : "";
+  const mcapLine = params.marketCap !== null
+    ? `\n💎 MCap: <b>${Math.round(params.marketCap).toLocaleString("en-US")}</b>`
+    : "";
+
+  const socialParts: string[] = [];
+  if (params.telegramUrl) socialParts.push(`<a href="${params.telegramUrl}">Telegram</a>`);
+  if (params.twitterUrl)  socialParts.push(`<a href="${params.twitterUrl}">X</a>`);
+  if (params.websiteUrl)  socialParts.push(`<a href="${params.websiteUrl}">Website</a>`);
+  const socialLine = socialParts.length > 0 ? `\n🌐 ${socialParts.join(" | ")}` : "";
+
+  const linkParts: string[] = [];
+  if (params.dextUrl) linkParts.push(`<a href="${params.dextUrl}">DexTools</a>`);
+  if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
+  const _eBuyLink = parseBuyLink(params.buyUrl);
+  if (_eBuyLink) linkParts.push(`<a href="${_eBuyLink.url}">${_eBuyLink.text}</a>`);
+  if (params.trendingUrl && params.trendingRank !== null) linkParts.push(`<a href="${params.trendingUrl}">🔥 Trending #${params.trendingRank}</a>`);
+  const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
+
+  return (
+    `${cEmoji} <b>${params.tokenName} [${params.tokenSymbol}]</b> — ${params.chainName} ${buyLabel}` +
+    trendingLine + `\n` +
+    `${emojiBar(params)}\n\n` +
+    `💰 <b>${nativeStr}</b>\n` +
+    `🛍 Got: <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
+    `📍 <a href="${buyerUrl}">${shortAddr}</a> | <a href="${txUrl}">Txn</a>` +
+    positionLine + mcapLine + socialLine + linksFooter
+  );
+}
+
+function buildEvmKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
+  return buildSosanaKeyboard(params);
 }
 
 // ── Style 2: Trending ──────────────────────────────────────────────────────────
@@ -257,16 +386,18 @@ function buildTrendingKeyboard(params: AlertParams): TelegramBot.InlineKeyboardM
 }
 
 // ── Dispatcher ─────────────────────────────────────────────────────────────────
-function buildAlertMessage(params: AlertParams): string {
-  return params.alertStyle === "trending"
-    ? buildTrendingMessage(params)
-    : buildSosanaMessage(params);
+function buildAlertMessage(params: AlertParams, emojiBarStr?: string): string {
+  if (params.alertStyle === "trending") return buildTrendingMessage(params);
+  if (params.alertStyle === "wave")     return buildWaveMessage(params, emojiBarStr);
+  if (params.alertStyle === "evm")      return buildEvmMessage(params);
+  return buildSosanaMessage(params);
 }
 
 function buildAlertKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
-  return params.alertStyle === "trending"
-    ? buildTrendingKeyboard(params)
-    : buildSosanaKeyboard(params);
+  if (params.alertStyle === "trending") return buildTrendingKeyboard(params);
+  if (params.alertStyle === "wave")     return buildWaveKeyboard(params);
+  if (params.alertStyle === "evm")      return buildEvmKeyboard(params);
+  return buildSosanaKeyboard(params);
 }
 
 interface BotInstance {
@@ -1033,6 +1164,11 @@ class BotRegistry {
     const mediaType = config.alertMediaType ?? "photo";
     const mediaUrl = config.alertImageUrl;
 
+    const isWaveStyle = alertParams.alertStyle === "wave";
+    const waveFrames = isWaveStyle
+      ? waveEmojiFrames(alertParams.alertEmoji || "🟢", (alertParams.emojiPerTier ?? 5) * alertParams.tier)
+      : [];
+
     const alertTokens = [token, ...(config.coBotToken ? [config.coBotToken] : [])];
     for (const tk of alertTokens) {
       const tgBot = new TelegramBot(tk, { polling: false });
@@ -1047,11 +1183,29 @@ class BotRegistry {
           await tgBot.sendPhoto(config.chatId, mediaSrc, mediaOpts).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy photo failed"));
         }
       } else {
-        await tgBot.sendMessage(config.chatId, message, {
+        const sent = await tgBot.sendMessage(config.chatId, message, {
           parse_mode: "HTML",
           disable_web_page_preview: true,
           reply_markup: keyboard,
-        }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed"));
+        }).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed"); return null; });
+
+        // Fire wave animation in background (non-blocking)
+        if (isWaveStyle && sent?.message_id && waveFrames.length > 1) {
+          void (async () => {
+            const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+            for (let i = 1; i < waveFrames.length; i++) {
+              await delay(400);
+              const frameMsg = buildAlertMessage(alertParams, waveFrames[i]);
+              await tgBot.editMessageText(frameMsg, {
+                chat_id: config.chatId,
+                message_id: sent.message_id,
+                parse_mode: "HTML",
+                disable_web_page_preview: true,
+                reply_markup: keyboard,
+              }).catch(() => {});
+            }
+          })();
+        }
       }
     }
 
