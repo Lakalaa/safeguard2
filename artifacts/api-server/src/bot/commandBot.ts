@@ -670,10 +670,12 @@ export function createCommandBot(token: string): TelegramBot {
 
       let reply = dexData
         ? `✅ <b>${name} (${sym})</b> found on <b>${CHAIN_LABELS[chainId] ?? chainId}</b>\n`
-        : `⚠️ Address saved, but token not found on DexScreener yet.\n`
+        : `⚠️ <b>Token metadata not found</b> — but your address is saved!\n\n`
           + `📍 <code>${address}</code>\n`
-          + `Chain: <b>${CHAIN_LABELS[chain] ?? chain}</b>\n\n`
-          + `<i>Tip: Make sure you copied the correct contract address. Token name will auto-fill once DexScreener indexes it.</i>\n`;
+          + `⛓ Chain: <b>${CHAIN_LABELS[chain] ?? chain}</b>\n\n`
+          + `✅ <b>Monitoring will still work.</b> Buys will be detected even without metadata.\n`
+          + `Token name will auto-fill once DexScreener or GeckoTerminal indexes it.\n\n`
+          + `<i>If this is a brand new token, wait a few minutes then use /add again.</i>\n`;
       if (priceUsd) reply += `💵 Price: $${priceUsd.toFixed(8)}\n`;
       if (mcap) {
         const mcapStr = mcap >= 1_000_000
