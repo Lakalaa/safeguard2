@@ -938,8 +938,12 @@ export function createCommandBot(token: string): TelegramBot {
       .set({ alertEmoji: emoji, emojiPerTier: saveCount, updatedAt: new Date() })
       .where(eq(botConfigTable.id, config.id));
     const display = emojiDisplay(emoji);
+    const isCustom = emoji.startsWith("<tg-emoji");
     await bot.sendMessage(chatId,
-      `\u2705 Emoji set!\n\nPreview: ${emoji.repeat(3)} \u2192 ${emoji.repeat(6)} \u2192 ${emoji.repeat(10)}\n\nBuy alerts will now use this emoji.`,
+      `\u2705 Emoji saved!\n\n` +
+      (isCustom ? `Custom animated emoji captured (base: <b>${display}</b>)\n` : `Emoji: <b>${display}</b>\n`) +
+      `\nPreview (small → big):\n${emoji.repeat(3)} → ${emoji.repeat(6)} → ${emoji.repeat(10)}\n\n` +
+      `<i>If this is wrong, type e.g. <code>/setmoji 🔥</code> to set a plain emoji directly.</i>`,
       { parse_mode: "HTML" });
   });
 
