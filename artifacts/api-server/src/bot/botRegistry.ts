@@ -146,18 +146,19 @@ function emojiBar(params: AlertParams): string {
 function waveEmojiFrames(emoji: string, count: number): string[] {
   const full = emoji.repeat(count);
   if (count <= 2) return [full, full, full, full, full];
+  // Use the user's own emoji as the "lit" moving cluster; ▫️ for unlit positions
   function frame(litStart: number, litLen: number): string {
-    const arr = Array(count).fill(emoji);
-    for (let i = litStart; i < Math.min(litStart + litLen, count); i++) arr[i] = "⚡";
+    const arr = Array(count).fill("▫️");
+    for (let i = litStart; i < Math.min(litStart + litLen, count); i++) arr[i] = emoji;
     return arr.join("");
   }
   const third = Math.max(1, Math.ceil(count / 3));
   return [
-    full,                              // Frame 1 – initial send
-    frame(0, third),                   // Frame 2 – left lights up
-    frame(third, third),               // Frame 3 – middle
-    frame(count - third, third),       // Frame 4 – right
-    full,                              // Frame 5 – settle back
+    full,                              // Frame 1 – initial (all user emoji)
+    frame(0, third),                   // Frame 2 – left sweep
+    frame(third, third),               // Frame 3 – middle sweep
+    frame(count - third, third),       // Frame 4 – right sweep
+    full,                              // Frame 5 – settle back (all user emoji)
   ];
 }
 
