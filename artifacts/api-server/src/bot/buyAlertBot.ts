@@ -83,6 +83,7 @@ function buildAlertMessage(params: {
   priceChangePct: number | null;
   priceUsd: number | null;
   liquidity: number | null;
+  buyUrl: string | null;
 }): string {
   const emoji = params.alertEmoji || "🟢";
   const circles = emoji.repeat(params.tier * params.emojiPerTier);
@@ -115,7 +116,8 @@ function buildAlertMessage(params: {
     `🔀 Spent <b>${formatNumber(params.amountUsd)}</b> (<b>${params.amountNative.toFixed(4)} ${params.nativeCurrency}</b>)\n` +
     `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `👤 <a href="${buyerUrl}">Buyer</a> | <a href="${txUrl}">TX</a>` +
-    pctLine + mcapLine + priceUsdLine + liquidityLine
+    pctLine + mcapLine + priceUsdLine + liquidityLine +
+    (params.buyUrl ? `\n\n<a href="${params.buyUrl}">🛒 Buy</a>` : "")
   );
 }
 
@@ -284,6 +286,7 @@ class BuyAlertBot {
       priceChangePct: priceChangePct ?? null,
       priceUsd: priceUsd ?? null,
       liquidity: liquidity ?? null,
+      buyUrl: config.buyUrl ?? null,
     });
 
     // ── Build inline keyboard buttons ─────────────────────────────────────
@@ -291,7 +294,7 @@ class BuyAlertBot {
     const alertButtons: { text: string; url: string }[] = [];
     if (config.dextUrl) alertButtons.push({ text: "📊 DexTools", url: config.dextUrl });
     if (config.screenerUrl) alertButtons.push({ text: "📈 Chart", url: config.screenerUrl });
-    if (config.buyUrl) alertButtons.push({ text: "🛒 Buy", url: config.buyUrl });
+    // Buy link shown as text hyperlink inside the message, not a keyboard button
     // Trending: use manually set URL, or fall back to DexScreener (auto-filled when token is added)
     const trendingHref = config.trendingUrl ?? config.screenerUrl ?? null;
     if (trendingHref) alertButtons.push({ text: "🔥 Trending", url: trendingHref });
