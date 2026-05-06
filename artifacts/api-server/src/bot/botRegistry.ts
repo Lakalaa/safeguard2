@@ -54,6 +54,17 @@ function getTier(amountUsd: number, tier2Min: number, tier3Min: number): number 
   return 1;                             // small
 }
 
+// Parse buyUrl which may be JSON {"text":"...","url":"..."} or a plain URL string
+function parseBuyLink(raw: string | null | undefined): { text: string; url: string } | null {
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw) as { text?: string; url?: string };
+    if (p.url?.startsWith("http")) return { text: p.text || "🛒 Buy", url: p.url };
+  } catch { /* not JSON */ }
+  if (raw.startsWith("http")) return { text: "🛒 Buy", url: raw };
+  return null;
+}
+
 function formatNumber(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
@@ -126,7 +137,8 @@ function buildSosanaMessage(params: AlertParams): string {
   const linkParts: string[] = [];
   if (params.dextUrl) linkParts.push(`<a href="${params.dextUrl}">DexT</a>`);
   if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
-  if (params.buyUrl) linkParts.push(`<a href="${params.buyUrl}">Buy</a>`);
+  const _buyLink = parseBuyLink(params.buyUrl);
+  if (_buyLink) linkParts.push(`<a href="${_buyLink.url}">${_buyLink.text}</a>`);
   if (params.trendingUrl && params.trendingRank !== null) linkParts.push(`<a href="${params.trendingUrl}">🔥 Trending #${params.trendingRank}</a>`);
   const linksLine = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
@@ -144,7 +156,18 @@ function buildSosanaMessage(params: AlertParams): string {
 }
 
 function buildSosanaKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
-  return buildCustomButtonRows(params);
+  const mainRow: TelegramBot.InlineKeyboardButton[] = [];
+  if (params.dextUrl) mainRow.push({ text: "📊 DexTools", url: params.dextUrl });
+  if (params.screenerUrl) mainRow.push({ text: "📈 Chart", url: params.screenerUrl });
+  const _buyLinkSos = parseBuyLink(params.buyUrl);
+  if (_buyLinkSos) mainRow.push({ text: _buyLinkSos.text, url: _buyLinkSos.url });
+  const trendingHref = params.trendingUrl ?? params.screenerUrl ?? null;
+  const extraRows = buildCustomButtonRows(params).inline_keyboard;
+  const rows: TelegramBot.InlineKeyboardButton[][] = [];
+  if (mainRow.length > 0) rows.push(mainRow);
+  if (trendingHref) rows.push([{ text: "🔥 Trending", url: trendingHref }]);
+  rows.push(...extraRows);
+  return { inline_keyboard: rows };
 }
 
 // ── Style 2: Trending ──────────────────────────────────────────────────────────
@@ -214,13 +237,17 @@ function buildCustomButtonRows(params: AlertParams): TelegramBot.InlineKeyboardM
 }
 
 function buildTrendingKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
-  const fixedRow: TelegramBot.InlineKeyboardButton[] = [];
-  if (params.buyUrl) fixedRow.push({ text: "🛒 Buy", url: params.buyUrl });
-  if (params.dextUrl) fixedRow.push({ text: "📊 DexTools", url: params.dextUrl });
-  if (params.screenerUrl) fixedRow.push({ text: "📈 Screener", url: params.screenerUrl });
-  if (params.trendingUrl) fixedRow.push({ text: "🔥 Trending", url: params.trendingUrl });
+  const mainRow: TelegramBot.InlineKeyboardButton[] = [];
+  if (params.dextUrl) mainRow.push({ text: "📊 DexTools", url: params.dextUrl });
+  if (params.screenerUrl) mainRow.push({ text: "📈 Chart", url: params.screenerUrl });
+  const _buyLinkTrend = parseBuyLink(params.buyUrl);
+  if (_buyLinkTrend) mainRow.push({ text: _buyLinkTrend.text, url: _buyLinkTrend.url });
+  const trendingHref = params.trendingUrl ?? params.screenerUrl ?? null;
   const extraRows = buildCustomButtonRows(params).inline_keyboard;
-  const rows = [...(fixedRow.length > 0 ? [fixedRow] : []), ...extraRows];
+  const rows: TelegramBot.InlineKeyboardButton[][] = [];
+  if (mainRow.length > 0) rows.push(mainRow);
+  if (trendingHref) rows.push([{ text: "🔥 Trending", url: trendingHref }]);
+  rows.push(...extraRows);
   return { inline_keyboard: rows };
 }
 
@@ -408,7 +435,8 @@ function buildRepeatMessage(config: BotConfig, dexData: DexScreenerPair | null, 
   const linkParts: string[] = [];
   if (config.dextUrl) linkParts.push(`<a href="${config.dextUrl}">DexT</a>`);
   if (config.screenerUrl) linkParts.push(`<a href="${config.screenerUrl}">Screener</a>`);
-  if (config.buyUrl) linkParts.push(`<a href="${config.buyUrl}">Buy</a>`);
+  const _buyLinkRepeat = parseBuyLink(config.buyUrl);
+  if (_buyLinkRepeat) linkParts.push(`<a href="${_buyLinkRepeat.url}">${_buyLinkRepeat.text}</a>`);
   const linksLine = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
   return (
