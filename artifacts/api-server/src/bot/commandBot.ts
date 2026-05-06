@@ -43,8 +43,6 @@ type PendingState =
   | { step: "await_broadcast_image" }
   | { step: "await_broadcast_buttons" }
   | { step: "await_co_bot_token" }
-  | { step: "await_tier2_min" }
-  | { step: "await_tier3_min" }
   | { step: "await_post_text" }
   | { step: "await_post_image"; text: string }
   | { step: "await_post_buttons"; text: string; imageFileId?: string };
@@ -162,9 +160,6 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
       [
         { text: config.broadcastInterval ? "📢 Broadcast ✅" : "📢 Broadcast", callback_data: "cfg:broadcast" },
         { text: config.coBotToken ? "🤝 Co-Bot ✅" : "🤝 Co-Bot", callback_data: "cfg:cobot" },
-      ],
-      [
-        { text: `🐋 Tiers: $${config.tier2Min ?? 500} / $${config.tier3Min ?? 1000}`, callback_data: "cfg:tiers" },
       ],
       [
         {
@@ -425,7 +420,7 @@ function statusText(config: BotConfig, running: boolean): string {
   if (config.tokenAddress) lines.push(`<b>Address:</b> <code>${config.tokenAddress}</code>`);
   lines.push(`\n<b>Min Buy:</b> $${min}`);
   lines.push(
-    `<b>Alert emoji:</b> ${emoji.repeat(count)} small  |  ${emoji.repeat(count * 2)} medium  |  ${emoji.repeat(count * 3)} 🐋 whale`,
+    `<b>Alert emoji:</b> ${emoji.repeat(count)} (×${count} per min-buy, scales with size)`,
   );
   if (config.alertMediaFileId || config.alertImageUrl) lines.push(`<b>Alert media:</b> ✅`);
   if (config.buyUrl) lines.push(`<b>Buy link:</b> ✅`);
@@ -1016,7 +1011,7 @@ export function createCommandBot(token: string): TelegramBot {
       const e = config.alertEmoji ?? "🟢";
       const c = config.emojiPerTier ?? 5;
       await bot.sendMessage(chatId,
-        `🎨 <b>Set Alert Emoji</b>\n\nReply with the emoji to use on buy alerts.\n\nExamples: 🔥 💎 🚀 ⚡ 🐋 🟢 💰\n\nCurrent preview with <b>${e} ×${c}</b>:\n• Small buy: ${e.repeat(c)}\n• Medium buy: ${e.repeat(c * 2)}\n• 🐋 Whale: ${e.repeat(c * 3)}`,
+        `🎨 <b>Set Alert Emoji</b>\n\nReply with the emoji to use on buy alerts.\n\nExamples: 🔥 💎 🚀 ⚡ 🐋 🟢 💰\n\nCurrent: <b>${e}</b> — scales automatically with buy size.`,
         { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
       );
       return;
@@ -1437,22 +1432,6 @@ Send <code>clear</code> to remove the buy link.`,
       return;
     }
 
-    // Tier thresholds — medium buy and whale thresholds
-    if (data === "cfg:tiers") {
-      const t2 = config.tier2Min ?? 500;
-      const t3 = config.tier3Min ?? 1000;
-      pendingState.set(chatId, { step: "await_tier2_min" });
-      await bot.sendMessage(chatId,
-        `🐋 <b>Buy Tier Thresholds</b>\n\n` +
-        `Controls when buys get the 🐋 <b>Whale</b> or medium label.\n\n` +
-        `Current settings:\n` +
-        `• Medium buy: <b>$${t2}+</b>\n` +
-        `• Whale buy: <b>$${t3}+</b>\n\n` +
-        `<b>Step 1/2</b> — Reply with the <b>medium buy threshold</b> in USD.\nExample: <code>500</code>\n\n` +
-        `(Buys below this amount are labeled "small buy")`,
-        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
-      return;
-    }
 
     // Social links flow
     if (data === "cfg:social") {
@@ -1516,7 +1495,7 @@ Send <code>clear</code> to remove the buy link.`,
       const emoji = msg.text.trim();
       pendingState.set(chatId, { step: "await_emoji_count", emoji });
       await bot.sendMessage(chatId,
-        `✅ Emoji: <b>${emoji}</b>\n\nNow reply with how many to show per buy (1–10):\n\nPreview with 5:\n• Small buy: ${emoji.repeat(5)}\n• Medium buy: ${emoji.repeat(10)}\n• 🐋 Whale: ${emoji.repeat(15)}`,
+        `✅ Emoji: <b>${emoji}</b>\n\nNow reply with how many to show at the minimum buy amount (1–10):\nThe count will grow automatically for bigger buys.\n\nPreview at min-buy: ${emoji.repeat(5)}`,
         { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
       );
       return;
@@ -1536,7 +1515,7 @@ Send <code>clear</code> to remove the buy link.`,
         .set({ alertEmoji: emoji, emojiPerTier: n, updatedAt: new Date() })
         .where(eq(botConfigTable.id, config.id));
       await bot.sendMessage(chatId,
-        `✅ Emoji saved!\n• Small buy: ${emoji.repeat(n)}\n• Medium buy: ${emoji.repeat(n * 2)}\n• 🐋 Whale: ${emoji.repeat(n * 3)}\n\nScales automatically — no thresholds needed.`);
+        `✅ Emoji saved! <b>${emoji}</b> ×${n} at min-buy, scales up automatically for bigger buys.`);
       const updated = await getOrCreate(chatId);
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running);
@@ -1894,41 +1873,6 @@ Send <code>clear</code> to remove the buy link.`,
       return;
     }
 
-    // ── Tier thresholds step 1: medium buy amount ─────────────────────────────
-    if (state.step === "await_tier2_min") {
-      const raw = (msg.text ?? "").trim();
-      const n = parseFloat(raw);
-      if (isNaN(n) || n <= 0) {
-        await bot.sendMessage(chatId, `❌ Invalid amount. Enter a number like <code>500</code>`, { parse_mode: "HTML" });
-        pendingState.set(chatId, { step: "await_tier2_min" });
-        return;
-      }
-      pendingState.delete(chatId);
-      pendingState.set(chatId, { step: "await_tier3_min" });
-      await db.update(botConfigTable).set({ tier2Min: n, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
-      await bot.sendMessage(chatId,
-        `✅ Medium buy set to <b>$${n}+</b>\n\n<b>Step 2/2</b> — Reply with the <b>🐋 whale buy threshold</b> in USD.\nExample: <code>1000</code>\n\n(Buys at or above this will show the 🐋 whale label)`,
-        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
-      return;
-    }
-
-    // ── Tier thresholds step 2: whale amount ──────────────────────────────────
-    if (state.step === "await_tier3_min") {
-      const raw = (msg.text ?? "").trim();
-      const n = parseFloat(raw);
-      if (isNaN(n) || n <= 0) {
-        await bot.sendMessage(chatId, `❌ Invalid amount. Enter a number like <code>1000</code>`, { parse_mode: "HTML" });
-        pendingState.set(chatId, { step: "await_tier3_min" });
-        return;
-      }
-      pendingState.delete(chatId);
-      const freshCfg = await getOrCreate(chatId);
-      await db.update(botConfigTable).set({ tier3Min: n, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
-      await bot.sendMessage(chatId,
-        `✅ <b>Buy tiers updated!</b>\n\n• Small buy: <b>below $${freshCfg.tier2Min ?? 500}</b>\n• Medium buy: <b>$${freshCfg.tier2Min ?? 500}+</b>\n• 🐋 Whale: <b>$${n}+</b>`,
-        { parse_mode: "HTML" });
-      return;
-    }
 
     // ── /post step 1: capture message text ────────────────────────────────────
     if (state.step === "await_post_text") {
