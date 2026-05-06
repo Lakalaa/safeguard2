@@ -61,12 +61,34 @@ async function isAdmin(bot: TelegramBot, chatId: string | number, userId: number
   }
 }
 
-// ── Button row builder — 2 buttons per row ────────────────────────────────────
-function buildButtonRows(buttons: { text: string; url: string }[]): TelegramBot.InlineKeyboardButton[][] {
-  const rows: TelegramBot.InlineKeyboardButton[][] = [];
-  for (let i = 0; i < buttons.length; i += 2) {
-    rows.push(buttons.slice(i, i + 2).map((b) => ({ text: b.text, url: b.url })));
+// ── Button row builder ────────────────────────────────────────────────────────
+// Accepts 2D array: each inner array is one row of buttons.
+function buildButtonRows(rows: { text: string; url: string }[][]): TelegramBot.InlineKeyboardButton[][] {
+  return rows.map(row => row.map(b => ({ text: b.text, url: b.url })));
+}
+
+// ── Button input parser ───────────────────────────────────────────────────────
+// Each line = one row. Within a line, " || " separates buttons on the same row.
+// Format per button: "Label | https://url"
+// Returns rows on success or a string error message.
+function parseButtonInput(rawText: string): { text: string; url: string }[][] | string {
+  const lines = rawText.split("\n").filter(l => l.trim());
+  const rows: { text: string; url: string }[][] = [];
+  for (const line of lines) {
+    const btnStrs = line.split("||").map(s => s.trim());
+    const row: { text: string; url: string }[] = [];
+    for (const btnStr of btnStrs) {
+      const pipeIdx = btnStr.indexOf("|");
+      if (pipeIdx === -1) return `❌ Missing "|" in: <code>${btnStr}</code>\nFormat: <code>Label | https://url</code>`;
+      const btnText = btnStr.slice(0, pipeIdx).trim();
+      const btnUrl  = btnStr.slice(pipeIdx + 1).trim();
+      if (!btnText)                  return `❌ Empty label in: <code>${btnStr}</code>`;
+      if (!btnUrl.startsWith("http")) return `❌ URL must start with http in: <code>${btnStr}</code>`;
+      row.push({ text: btnText, url: btnUrl });
+    }
+    if (row.length > 0) rows.push(row);
   }
+  if (rows.length === 0) return "❌ No valid buttons found.";
   return rows;
 }
 
@@ -1003,7 +1025,7 @@ Send <code>clear</code> to remove the buy link.`,
     if (data === "cfg:buy:buttons") {
       pendingState.set(chatId, { step: "await_buy_buttons" });
       await bot.sendMessage(chatId,
-        `🔗 <b>Buy Alert Custom Buttons</b>\n\nAdd extra inline buttons that appear below every buy alert.\n\nSend one button per line:\n<code>Button Text | https://link.com</code>\n\nExample:\n<code>🗳 Vote Now | https://coinvote.cc/token/HORNY\n🔥 Trending | https://dexscreener.com\n📢 Telegram | https://t.me/yourchat</code>\n\nYou can add up to <b>6 buttons</b>, shown 2 per row.\nSend <code>clear</code> to remove all buttons.`,
+        `🔗 <b>Buy Alert Custom Buttons</b>\n\nEach line = one row. Use <b>||</b> to put multiple buttons on the same row.\n\nFormat:\n<code>Label | https://url</code>\n<code>Label | https://url || Label | https://url</code>\n\nExample:\n<code>🗳 Vote | https://coinvote.cc/token/HORNY\n🔥 Trending | https://dexscreener.com || 📊 Chart | https://dextools.io\n🌐 Website | https://horny.xyz</code>\n\nResult:\n[🗳 Vote]\n[🔥 Trending] [📊 Chart]\n[🌐 Website]\n\nSend <code>clear</code> to remove all buttons.`,
         { parse_mode: "HTML" },
       );
       return;
@@ -1185,7 +1207,7 @@ Send <code>clear</code> to remove the buy link.`,
     if (data === "cfg:vote:buttons") {
       pendingState.set(chatId, { step: "await_vote_buttons" });
       await bot.sendMessage(chatId,
-        `🔗 <b>Custom Buttons</b>\n\nSend one button per line in this format:\n<code>Button Text | https://link.com</code>\n\nExample:\n<code>🗳 Vote for TOKEN | https://coinvote.cc/token/TOKEN\n🎰 Create Raffle | https://t.me/rafflebot\n⚡ Boost Votes | https://example.com\n🔥 Buy Trending | https://dexscreener.com</code>\n\nAdd as many buttons as you want, shown 2 per row. Send <code>clear</code> to remove all buttons.`,
+        `🔗 <b>Custom Buttons</b>\n\nEach line = one row. Use <b>||</b> to put multiple buttons on the same row.\n\nFormat:\n<code>Label | https://url</code>\n<code>Label | https://url || Label | https://url</code>\n\nExample:\n<code>🗳 Vote | https://coinvote.cc\n⚡ Boost | https://example.com || 🎰 Raffle | https://t.me/rafflebot\n🔥 Trending | https://dexscreener.com</code>\n\nResult:\n[🗳 Vote]\n[⚡ Boost] [🎰 Raffle]\n[🔥 Trending]\n\nSend <code>clear</code> to remove all buttons.`,
         { parse_mode: "HTML" },
       );
       return;
@@ -1237,7 +1259,7 @@ Send <code>clear</code> to remove the buy link.`,
       if (data === "cfg:broadcast:buttons") {
         pendingState.set(chatId, { step: "await_broadcast_buttons" });
         await bot.sendMessage(chatId,
-          `🔗 <b>Broadcast Buttons</b>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://horny.xyz</code>\n<code>🛒 Buy Now | https://jup.ag</code>\n<code>📊 Chart | https://dexscreener.com/...</code>\n\nAdd as many buttons as you want, 2 per row. Send <code>clear</code> to remove all.`,
+          `🔗 <b>Broadcast Buttons</b>\n\nEach line = one row. Use <b>||</b> to put multiple buttons on the same row.\n\nExample:\n<code>🌐 Website | https://horny.xyz\n🛒 Buy Now | https://jup.ag || 📊 Chart | https://dexscreener.com\n📢 Telegram | https://t.me/yourchat</code>\n\nResult:\n[🌐 Website]\n[🛒 Buy Now] [📊 Chart]\n[📢 Telegram]\n\nSend <code>clear</code> to remove all.`,
           { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
         return;
       }
@@ -1264,8 +1286,11 @@ Send <code>clear</code> to remove the buy link.`,
         try {
           let keyboard: TelegramBot.InlineKeyboardMarkup | undefined;
           if (config.broadcastButtons) {
-            const btns = JSON.parse(config.broadcastButtons) as { text: string; url: string }[];
-            if (btns.length) keyboard = { inline_keyboard: buildButtonRows(btns) };
+            const btns = JSON.parse(config.broadcastButtons) as { text: string; url: string }[][] | { text: string; url: string }[];
+            if (btns.length) {
+              const rows2d = Array.isArray(btns[0]) ? (btns as { text: string; url: string }[][]) : [(btns as { text: string; url: string }[])];
+              keyboard = { inline_keyboard: buildButtonRows(rows2d) };
+            }
           }
           if (config.broadcastImageFileId) {
             await bot.sendPhoto(config.chatId, config.broadcastImageFileId, {
@@ -1515,27 +1540,16 @@ Send <code>clear</code> to remove the buy link.`,
         await sendSettings(bot, chatId, updated, running);
         return;
       }
-      const lines = rawText.split("\n").filter(Boolean);
-      const buttons: { text: string; url: string }[] = [];
-      for (const line of lines) {
-        const [btnText, btnUrl] = line.split("|").map((s) => s.trim());
-        if (!btnText || !btnUrl || !btnUrl.startsWith("http")) {
-          await bot.sendMessage(chatId,
-            `❌ Invalid line: <code>${line}</code>\nFormat must be: <code>Button Text | https://url.com</code>`,
-            { parse_mode: "HTML" },
-          );
-          return;
-        }
-        buttons.push({ text: btnText, url: btnUrl });
-      }
-      if (buttons.length > 6) {
-        await bot.sendMessage(chatId, `❌ Too many buttons. Maximum is <b>6</b>. You sent ${buttons.length}. Please try again with 6 or fewer.`, { parse_mode: "HTML" });
+      const parsed = parseButtonInput(rawText);
+      if (typeof parsed === "string") {
+        await bot.sendMessage(chatId, parsed + "\n\nEach line = one row. Use <b>||</b> for multiple buttons on the same row.", { parse_mode: "HTML" });
         return;
       }
+      const totalBtns = parsed.reduce((n, r) => n + r.length, 0);
       pendingState.delete(chatId);
-      await db.update(botConfigTable).set({ buyButtons: JSON.stringify(buttons), updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      await db.update(botConfigTable).set({ buyButtons: JSON.stringify(parsed), updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
       const updated = await getOrCreate(chatId);
-      await bot.sendMessage(chatId, `✅ ${buttons.length} button(s) saved. They'll appear on every buy alert.`, { parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `✅ ${totalBtns} button(s) in ${parsed.length} row(s) saved. They'll appear on every buy alert.`, { parse_mode: "HTML" });
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running);
       return;
@@ -1661,23 +1675,16 @@ Send <code>clear</code> to remove the buy link.`,
         await bot.sendMessage(chatId, "Back to Vote settings:", { parse_mode: "HTML", reply_markup: voteMenuKeyboard(updated) });
         return;
       }
-      const lines = rawText.split("\n").filter(Boolean);
-      const buttons: { text: string; url: string }[] = [];
-      for (const line of lines) {
-        const [btnText, btnUrl] = line.split("|").map((s) => s.trim());
-        if (!btnText || !btnUrl || !btnUrl.startsWith("http")) {
-          await bot.sendMessage(chatId,
-            `❌ Invalid line: <code>${line}</code>\nFormat must be: <code>Button Text | https://url.com</code>`,
-            { parse_mode: "HTML" },
-          );
-          return;
-        }
-        buttons.push({ text: btnText, url: btnUrl });
+      const parsedVote = parseButtonInput(rawText);
+      if (typeof parsedVote === "string") {
+        await bot.sendMessage(chatId, parsedVote + "\n\nEach line = one row. Use <b>||</b> for multiple buttons on the same row.", { parse_mode: "HTML" });
+        return;
       }
+      const totalVoteBtns = parsedVote.reduce((n, r) => n + r.length, 0);
       pendingState.delete(chatId);
-      await db.update(botConfigTable).set({ voteButtons: JSON.stringify(buttons), updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      await db.update(botConfigTable).set({ voteButtons: JSON.stringify(parsedVote), updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
       const updated = await getOrCreate(chatId);
-      await bot.sendMessage(chatId, `✅ ${buttons.length} button(s) saved.`, { parse_mode: "HTML" });
+      await bot.sendMessage(chatId, `✅ ${totalVoteBtns} button(s) in ${parsedVote.length} row(s) saved.`, { parse_mode: "HTML" });
       await bot.sendMessage(chatId, "Back to Vote settings:", { parse_mode: "HTML", reply_markup: voteMenuKeyboard(updated) });
       return;
     }
@@ -1728,21 +1735,16 @@ Send <code>clear</code> to remove the buy link.`,
         await bot.sendMessage(chatId, `🗑 Broadcast buttons cleared.`, { parse_mode: "HTML", reply_markup: broadcastKeyboard(updated) });
         return;
       }
-      const lines = rawText.split("\n").filter(Boolean);
-      const buttons: { text: string; url: string }[] = [];
-      for (const line of lines) {
-        const parts = line.split("|").map(s => s.trim());
-        const btnText = parts[0]; const btnUrl = parts[1];
-        if (!btnText || !btnUrl || !btnUrl.startsWith("http")) {
-          await bot.sendMessage(chatId, `❌ Invalid line: <code>${line}</code>\nFormat: <code>Label | https://url</code>`, { parse_mode: "HTML" });
-          pendingState.set(chatId, { step: "await_broadcast_buttons" });
-          return;
-        }
-        buttons.push({ text: btnText, url: btnUrl });
+      const parsedBC = parseButtonInput(rawText);
+      if (typeof parsedBC === "string") {
+        await bot.sendMessage(chatId, parsedBC + "\n\nEach line = one row. Use <b>||</b> for multiple buttons on the same row.", { parse_mode: "HTML" });
+        pendingState.set(chatId, { step: "await_broadcast_buttons" });
+        return;
       }
-      await db.update(botConfigTable).set({ broadcastButtons: JSON.stringify(buttons), updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+      const totalBCBtns = parsedBC.reduce((n, r) => n + r.length, 0);
+      await db.update(botConfigTable).set({ broadcastButtons: JSON.stringify(parsedBC), updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
       const updated = await getOrCreate(chatId);
-      await bot.sendMessage(chatId, `✅ ${buttons.length} button(s) saved!`, { parse_mode: "HTML", reply_markup: broadcastKeyboard(updated) });
+      await bot.sendMessage(chatId, `✅ ${totalBCBtns} button(s) in ${parsedBC.length} row(s) saved!`, { parse_mode: "HTML", reply_markup: broadcastKeyboard(updated) });
       return;
     }
 
@@ -1859,7 +1861,7 @@ Send <code>clear</code> to remove the buy link.`,
       pendingState.delete(chatId);
       pendingState.set(chatId, { step: "await_post_buttons", text: state.text, imageFileId });
       await bot.sendMessage(chatId,
-        `${imageFileId ? "✅ Image saved!\n\n" : ""}🔗 <b>Add Buttons?</b>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://example.com</code>\n<code>🛒 Buy Now | https://jup.ag/...</code>\n\nAdd as many buttons as you want, displayed 2 per row.\n\nOr send <code>skip</code> to post without buttons.`,
+        `${imageFileId ? "✅ Image saved!\n\n" : ""}🔗 <b>Add Buttons?</b>\n\nEach line = one row. Use <b>||</b> to put multiple buttons on the same row.\n\nExample:\n<code>🌐 Website | https://example.com\n🛒 Buy Now | https://jup.ag || 📊 Chart | https://dexscreener.com</code>\n\nResult:\n[🌐 Website]\n[🛒 Buy Now] [📊 Chart]\n\nSend <code>skip</code> to post without buttons.`,
         { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
       return;
     }
@@ -1868,25 +1870,20 @@ Send <code>clear</code> to remove the buy link.`,
     if (state.step === "await_post_buttons") {
       const rawText = (msg.text ?? "").trim();
       pendingState.delete(chatId);
-      let buttons: { text: string; url: string }[] = [];
+      let postRows: { text: string; url: string }[][] = [];
       if (rawText.toLowerCase() !== "skip") {
-        const lines = rawText.split("\n").filter(Boolean);
-        for (const line of lines) {
-          const parts = line.split("|").map((s) => s.trim());
-          const btnText = parts[0];
-          const btnUrl = parts[1];
-          if (!btnText || !btnUrl || !btnUrl.startsWith("http")) {
-            await bot.sendMessage(chatId,
-              `❌ Invalid line: <code>${line}</code>\n\nFormat: <code>Button Label | https://url</code>\n\nSend all buttons again, or <code>skip</code> to post without buttons:`,
-              { parse_mode: "HTML" });
-            pendingState.set(chatId, { step: "await_post_buttons", text: state.text, imageFileId: state.imageFileId });
-            return;
-          }
-          buttons.push({ text: btnText, url: btnUrl });
+        const parsedPost = parseButtonInput(rawText);
+        if (typeof parsedPost === "string") {
+          await bot.sendMessage(chatId,
+            parsedPost + "\n\nEach line = one row. Use <b>||</b> for multiple buttons on the same row. Or <code>skip</code> to post without buttons:",
+            { parse_mode: "HTML" });
+          pendingState.set(chatId, { step: "await_post_buttons", text: state.text, imageFileId: state.imageFileId });
+          return;
         }
+        postRows = parsedPost;
       }
-      const postKeyboard = buttons.length > 0
-        ? { inline_keyboard: buildButtonRows(buttons) }
+      const postKeyboard = postRows.length > 0
+        ? { inline_keyboard: buildButtonRows(postRows) }
         : undefined;
       try {
         if (state.imageFileId) {
@@ -1907,7 +1904,7 @@ Send <code>clear</code> to remove the buy link.`,
         await db.update(botConfigTable).set({
           broadcastText: state.text,
           broadcastImageFileId: state.imageFileId ?? null,
-          broadcastButtons: buttons.length > 0 ? JSON.stringify(buttons) : null,
+          broadcastButtons: postRows.length > 0 ? JSON.stringify(postRows) : null,
           broadcastInterval: null,
           updatedAt: new Date(),
         }).where(eq(botConfigTable.id, cfg.id));
@@ -1926,31 +1923,24 @@ Send <code>clear</code> to remove the buy link.`,
       const rawText = (msg.text ?? "").trim();
       const { commandName, messageText } = state;
 
-      const lines = rawText.split("\n").filter(Boolean);
-      const buttons: { text: string; url: string }[] = [];
-      for (const line of lines) {
-        const parts = line.split("|").map((s) => s.trim());
-        const btnText = parts[0];
-        const btnUrl = parts[1];
-        if (!btnText || !btnUrl || !btnUrl.startsWith("http")) {
-          await bot.sendMessage(chatId,
-            `❌ Invalid line: <code>${line}</code>\n\nFormat: <code>Button Label | https://url</code>\n\nOne button per line. Send again:`,
-            { parse_mode: "HTML" });
-          return;
-        }
-        buttons.push({ text: btnText, url: btnUrl });
+      const parsedFilter = parseButtonInput(rawText);
+      if (typeof parsedFilter === "string") {
+        await bot.sendMessage(chatId,
+          parsedFilter + "\n\nEach line = one row. Use <b>||</b> for multiple buttons on the same row. Send again:",
+          { parse_mode: "HTML" });
+        return;
       }
 
       pendingState.delete(chatId);
-      const buttonsJson = JSON.stringify(buttons);
+      const buttonsJson = JSON.stringify(parsedFilter);
       const cfg = await getOrCreate(chatId);
       await db.update(customCommandsTable)
         .set({ buttonsJson })
         .where(and(eq(customCommandsTable.botConfigId, cfg.id), eq(customCommandsTable.commandName, commandName)));
 
       await bot.sendMessage(chatId,
-        `✅ ${buttons.length} button(s) added to <code>/${commandName}</code>!\n\n` +
-        `${buttons.map(b => `• ${b.text}`).join("\n")}`,
+        `✅ ${parsedFilter.reduce((n,r)=>n+r.length,0)} button(s) in ${parsedFilter.length} row(s) added to <code>/${commandName}</code>!\n\n` +
+        `${parsedFilter.flat().map(b => `• ${b.text}`).join("\n")}`,
         { parse_mode: "HTML" });
       return;
     }
