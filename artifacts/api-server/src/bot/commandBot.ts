@@ -982,7 +982,14 @@ export function createCommandBot(token: string): TelegramBot {
     if (data === "cfg:buy") {
       pendingState.set(chatId, { step: "await_buy_link" });
       await bot.sendMessage(chatId,
-        `🛒 <b>Set Buy Link</b>\n\nReply with your token's buy URL:\n\nExamples:\n• <code>https://raydium.io/swap/?outputMint=…</code>\n• <code>https://app.uniswap.org/swap?outputCurrency=…</code>\n• <code>https://jup.ag/swap/SOL-…</code>`,
+        `🛒 <b>Set Buy Link</b>
+
+Reply with your token's buy URL:
+
+Examples:
+• <code>https://raydium.io/swap/?outputMint=…</code>
+• <code>https://app.uniswap.org/swap?outputCurrency=…</code>
+• <code>https://jup.ag/swap/SOL-…</code>`,
         { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
       );
       return;
@@ -1460,35 +1467,15 @@ export function createCommandBot(token: string): TelegramBot {
     if (state.step === "await_buy_link") {
       if (!msg.text) return;
       pendingState.delete(chatId);
-      const raw = msg.text.trim();
-      // Accept both "Label | URL" and plain URL
-      let buyLabel = "🛒 Buy";
-      let buyHref = raw;
-      if (raw.includes("|")) {
-        const sepIdx = raw.indexOf("|");
-        const labelPart = raw.slice(0, sepIdx).trim();
-        const urlPart = raw.slice(sepIdx + 1).trim();
-        if (urlPart.startsWith("http")) {
-          buyLabel = labelPart || "🛒 Buy";
-          buyHref = urlPart;
-        }
-      }
-      if (!buyHref.startsWith("http")) {
-        await bot.sendMessage(chatId,
-          "❌ Couldn't find a valid URL. Make sure it starts with http.
-
-Format: <code>Button Label | https://your-link.com</code>",
-          { parse_mode: "HTML" });
+      const url = msg.text.trim();
+      if (!url.startsWith("http")) {
+        await bot.sendMessage(chatId, "❌ Please paste a valid URL starting with http.");
         return;
       }
-      // Store as "Label|||URL" so the label is preserved on alerts
       await db.update(botConfigTable)
-        .set({ buyUrl: `${buyLabel}|||${buyHref}`, updatedAt: new Date() })
+        .set({ buyUrl: url, updatedAt: new Date() })
         .where(eq(botConfigTable.id, config.id));
-      await bot.sendMessage(chatId, `✅ Buy button saved!
-
-Button label: <b>${buyLabel}</b>
-URL: <code>${buyHref}</code>`, { parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "✅ Buy link saved.");
       const updated = await getOrCreate(chatId);
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running);
