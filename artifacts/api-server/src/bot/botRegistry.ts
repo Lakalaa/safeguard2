@@ -141,7 +141,12 @@ function chainEmoji(chainName: string): string {
   if (n.includes("base")) return "🔵";
   if (n.includes("solana") || n === "sol") return "◎";
   if (n.includes("avalanche") || n.includes("avax")) return "🔺";
-  if (n.includes("fantom")) return "🌐";
+  if (n.includes("fantom") || n === "ftm") return "👻";
+  if (n.includes("tron") || n === "trx") return "♦️";
+  if (n.includes("cronos") || n === "cro") return "🔵";
+  if (n.includes("sui")) return "💧";
+  if (n.includes("ton")) return "💎";
+  if (n.includes("near")) return "🌙";
   return "🔗";
 }
 
@@ -336,21 +341,22 @@ function buildTrendingMessage(params: AlertParams): string {
   if (params.screenerUrl) trendLinkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   const _buyLinkMsg = parseBuyLink(params.buyUrl);
   if (_buyLinkMsg) trendLinkParts.push(`<a href="${_buyLinkMsg.url}">${_buyLinkMsg.text}</a>`);
-  const trendLinksInline = trendLinkParts.length > 0 ? `  ${trendLinkParts.join(" | ")}` : "";
+  if (params.trendingUrl && params.trendingRank !== null) trendLinkParts.push(`<a href="${params.trendingUrl}">🔥 Trending #${params.trendingRank}</a>`);
+  const trendLinksFooter = trendLinkParts.length > 0 ? `\n\n${trendLinkParts.join(" | ")}` : "";
 
   return (
     `<b>${params.tokenName} [${params.tokenSymbol}] Buy!</b>` +
     trendingHeaderLine + `\n` +
     `${emojiBar(params)}\n\n` +
     `💲| <b>${nativeStr}</b>\n` +
-    `💼| Got: <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>` +
-    trendLinksInline + `\n` +
+    `💼| Got: <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `👤| <a href="${buyerUrl}">${shortBuyer}</a> | <a href="${txUrl}">Txn</a>` +
     positionLine +
     mcapLine +
     socialLine +
     dexPaidLine +
-    trendingFooterLine
+    trendingFooterLine +
+    trendLinksFooter
   );
 }
 
