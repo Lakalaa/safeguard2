@@ -454,17 +454,26 @@ async function sendSettings(
 // We store them as <tg-emoji emoji-id="ID">base</tg-emoji> so .repeat() works.
 
 /** Extract custom emoji from message entities and format for storage */
-function extractEmoji(msg: { text?: string | null; sticker?: { emoji?: string } | null; entities?: Array<{ type: string; offset: number; length: number; custom_emoji_id?: string }> | null }): string {
-  // Check for custom_emoji entity (Telegram Premium animated emoji in text)
+function extractEmoji(msg: {
+  text?: string | null;
+  sticker?: { emoji?: string | null; type?: string | null; custom_emoji_id?: string | null } | null;
+  entities?: Array<{ type: string; offset: number; length: number; custom_emoji_id?: string }> | null;
+}): string {
+  // 1. Custom emoji STICKER (Telegram Premium animated emoji sent as sticker)
+  if (msg.sticker?.type === "custom_emoji" && msg.sticker.custom_emoji_id) {
+    const base = msg.sticker.emoji ?? "\uD83D\uDD25";
+    return `<tg-emoji emoji-id="${msg.sticker.custom_emoji_id}">${base}</tg-emoji>`;
+  }
+  // 2. Regular / animated / video sticker — use its base emoji character
+  if (msg.sticker?.emoji) return msg.sticker.emoji;
+  // 3. Telegram Premium custom emoji inline in text (entity type custom_emoji)
   const customEntity = msg.entities?.find(e => e.type === "custom_emoji");
   if (customEntity?.custom_emoji_id && msg.text) {
-    const baseChar = msg.text.slice(customEntity.offset, customEntity.offset + customEntity.length) || "🔥";
+    const baseChar = msg.text.slice(customEntity.offset, customEntity.offset + customEntity.length) || "\uD83D\uDD25";
     return `<tg-emoji emoji-id="${customEntity.custom_emoji_id}">${baseChar}</tg-emoji>`;
   }
-  // Plain text emoji
+  // 4. Plain text emoji
   if (msg.text?.trim()) return msg.text.trim();
-  // Sticker fallback
-  if (msg.sticker?.emoji) return msg.sticker.emoji;
   return "";
 }
 
@@ -878,7 +887,9 @@ export function createCommandBot(token: string): TelegramBot {
     await sendSettings(bot, chatId, config, running);
   });
 
-  // ── /setmoji — direct emoji save (no multi-step state, survives restarts) ─
+  // ── /setmoji — set alert emoji: reply to any sticker OR type /setmoji 🔥 ─
+  // Works with: animated stickers, static stickers, custom emoji stickers, plain emoji
+  // Reply method is stateless — survives server restarts
   bot.onText(/^\/setmoji(?:@\S+)?(?:\s+(.+))?$/, async (msg, match) => {
     if (!msg.from) return;
     const chatId = String(msg.chat.id);
@@ -886,34 +897,49 @@ export function createCommandBot(token: string): TelegramBot {
       await bot.sendMessage(chatId, "\uD83D\uDD12 Only admins can set the emoji.");
       return;
     }
-    const arg = (match?.[1] ?? "").trim();
-    if (!arg) {
+    let emoji = "";
+    const argRaw = (match?.[1] ?? "").trim();
+
+    // ── Method 1: reply to any sticker / emoji message with /setmoji ──────
+    const replied = (msg as any).reply_to_message as typeof msg | undefined;
+    if (replied) {
+      emoji = extractEmoji(replied as Parameters<typeof extractEmoji>[0]);
+    }
+
+    // ── Method 2: inline emoji after command (/setmoji 🔥) ───────────────
+    if (!emoji && argRaw) {
+      // Find where the arg starts in the full text to locate entities
+      const cmdText = msg.text ?? "";
+      const argOffset = cmdText.indexOf(argRaw);
+      const customEntity = msg.entities?.find(
+        e => e.type === "custom_emoji" && argOffset >= 0 && e.offset >= argOffset
+      );
+      if (customEntity?.custom_emoji_id && msg.text) {
+        const baseChar = msg.text.slice(customEntity.offset, customEntity.offset + customEntity.length) || argRaw.split(/\s+/)[0]!;
+        emoji = `<tg-emoji emoji-id="${customEntity.custom_emoji_id}">${baseChar}</tg-emoji>`;
+      } else {
+        emoji = argRaw.split(/\s+/)[0]!.trim();
+      }
+    }
+
+    if (!emoji) {
       await bot.sendMessage(chatId,
-        "Usage: <code>/setmoji \uD83D\uDD25</code> or <code>/setmoji \uD83D\uDD25 5</code>\n\nFirst = emoji, optional second = count (1-10).",
+        `<b>\uD83C\uDFA8 Set Alert Emoji</b>\n\n<b>Option 1 — Reply to a sticker:</b>\nSend any sticker in the chat, then reply to it with <code>/setmoji</code>\nWorks with animated, static, and custom emoji stickers.\n\n<b>Option 2 — Inline:</b>\n<code>/setmoji \uD83D\uDD25</code>\nType or paste any emoji after the command.`,
         { parse_mode: "HTML" });
       return;
     }
-    // Check if the emoji part is a Telegram Premium custom emoji
-    const setmojiCustomEntity = msg.entities?.find(e => e.type === "custom_emoji" && msg.text && e.offset > (msg.text.indexOf(arg.split(/\s+/)[0]!) - 1));
-    let emoji: string;
-    if (setmojiCustomEntity?.custom_emoji_id && msg.text) {
-      const baseChar = msg.text.slice(setmojiCustomEntity.offset, setmojiCustomEntity.offset + setmojiCustomEntity.length) || arg.split(/\s+/)[0]!;
-      emoji = `<tg-emoji emoji-id="${setmojiCustomEntity.custom_emoji_id}">${baseChar}</tg-emoji>`;
-    } else {
-      const parts = arg.split(/\s+/);
-      emoji = parts[0]!.trim();
-    }
-    const argParts = arg.split(/\s+/);
-    const countRaw = argParts[1] ? parseInt(argParts[1]!) : NaN;
+
+    const argParts = argRaw.split(/\s+/);
+    const countRaw = !replied && argParts[1] ? parseInt(argParts[1]!) : NaN;
     const n = (!isNaN(countRaw) && countRaw >= 1 && countRaw <= 10) ? countRaw : null;
-    if (!emoji) { await bot.sendMessage(chatId, "\u274C Emoji cannot be empty."); return; }
     const config = await getOrCreate(chatId, msg.chat.title);
     const saveCount = n ?? config.emojiPerTier ?? 5;
     await db.update(botConfigTable)
       .set({ alertEmoji: emoji, emojiPerTier: saveCount, updatedAt: new Date() })
       .where(eq(botConfigTable.id, config.id));
+    const display = emojiDisplay(emoji);
     await bot.sendMessage(chatId,
-      "\u2705 Emoji set to <b>" + emoji + "</b> \u00D7" + saveCount + "\n\nPreview at min-buy: " + emoji.repeat(saveCount) + "\n\nBuy alerts will now use this emoji.",
+      `\u2705 Emoji set!\n\nPreview: ${emoji.repeat(3)} \u2192 ${emoji.repeat(6)} \u2192 ${emoji.repeat(10)}\n\nBuy alerts will now use this emoji.`,
       { parse_mode: "HTML" });
   });
 
