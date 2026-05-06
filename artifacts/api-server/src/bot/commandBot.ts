@@ -2,7 +2,7 @@ import TelegramBot from "node-telegram-bot-api";
 import { db } from "@workspace/db";
 import { botConfigTable, customCommandsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
-import { botRegistry, getDexScreenerData } from "./botRegistry";
+import { botRegistry, getDexScreenerData, diagnoseDex } from "./botRegistry";
 import { logger } from "../lib/logger";
 import type { BotConfig } from "@workspace/db";
 
@@ -855,6 +855,27 @@ export function createCommandBot(token: string): TelegramBot {
     const config = await getOrCreate(chatId, msg.chat.title);
     const { running } = botRegistry.getStatus(config.id);
     await sendSettings(bot, chatId, config, running);
+  });
+
+  // ── /diag — API diagnostic: shows exactly which sources work from Render ─
+  bot.onText(/^\/diag(@\S+)?$/, async (msg) => {
+    if (!msg.from) return;
+    const chatId = String(msg.chat.id);
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    const config = await getOrCreate(chatId, msg.chat.title);
+    if (!config.tokenAddress) {
+      await bot.sendMessage(chatId, "⚠️ No token address saved yet. Use /add first.", { parse_mode: "HTML" });
+      return;
+    }
+    const chain = config.chain ?? "solana";
+    await bot.sendMessage(chatId, `🔬 <b>Running API diagnostics…</b>\n\n📍 <code>${config.tokenAddress}</code>\n⛓ Chain: <b>${chain}</b>`, { parse_mode: "HTML" });
+    try {
+      const results = await diagnoseDex(config.tokenAddress, chain);
+      const report = results.join("\n");
+      await bot.sendMessage(chatId, `<b>API Diagnostic Results:</b>\n\n${report}`, { parse_mode: "HTML" });
+    } catch (e) {
+      await bot.sendMessage(chatId, `❌ Diagnostic error: ${String(e)}`);
+    }
   });
 
   // ── Callback query handler ────────────────────────────────────────────────
