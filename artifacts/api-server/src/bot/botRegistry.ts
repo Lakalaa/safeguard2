@@ -139,7 +139,7 @@ function buildSosanaMessage(params: AlertParams): string {
   if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   const _buyLink = parseBuyLink(params.buyUrl);
   if (_buyLink) linkParts.push(`<a href="${_buyLink.url}">${_buyLink.text}</a>`);
-  const linksInline = linkParts.length > 0 ? `\n${linkParts.join(" | ")}` : "";
+  const linksInline = linkParts.length > 0 ? `  ${linkParts.join(" | ")}` : "";
 
   return (
     `<b>${params.tokenName} ${buyLabel}</b>` +
@@ -206,7 +206,7 @@ function buildTrendingMessage(params: AlertParams): string {
   if (params.screenerUrl) trendLinkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   const _buyLinkMsg = parseBuyLink(params.buyUrl);
   if (_buyLinkMsg) trendLinkParts.push(`<a href="${_buyLinkMsg.url}">${_buyLinkMsg.text}</a>`);
-  const trendLinksInline = trendLinkParts.length > 0 ? `\n${trendLinkParts.join(" | ")}` : "";
+  const trendLinksInline = trendLinkParts.length > 0 ? `  ${trendLinkParts.join(" | ")}` : "";
 
   return (
     `<b>${params.tokenName} [${params.tokenSymbol}] Buy!</b>` +
