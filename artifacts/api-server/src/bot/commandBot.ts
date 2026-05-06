@@ -641,10 +641,11 @@ export function createCommandBot(token: string): TelegramBot {
     address: string,
     chain: string,
     config: BotConfig,
+    multiChainScan = false,
   ): Promise<void> {
-    await bot.sendMessage(chatId, `🔍 Looking up token on DexScreener…`);
+    await bot.sendMessage(chatId, `🔍 Looking up token…`);
     try {
-      const dexData = await getDexScreenerData(address, chain);
+      const dexData = await getDexScreenerData(address, multiChainScan ? null : chain);
       const chainId = dexData?.chainId ?? chain;
       const pairAddress = dexData?.pairAddress ?? null;
       const dextoolsChain = DEXTOOLS_CHAIN[chainId] ?? chainId;
@@ -1467,8 +1468,11 @@ Send <code>clear</code> to remove the buy link.`,
       const looksLikeEvm   = /^0x[0-9a-fA-F]{40}$/.test(txt);
       if (looksLikeSolana || looksLikeEvm) {
         const config = await getOrCreate(chatId, msg.chat.title);
-        const fallbackChain = config.chain ?? (looksLikeEvm ? "ethereum" : "solana");
-        await processTokenAddress(chatId, txt, fallbackChain, config);
+        // Use stored chain if known; for Solana addresses always use "solana";
+        // for EVM addresses with unknown chain pass null so getDexScreenerData
+        // tries ALL EVM chains on GeckoTerminal and returns the real chainId.
+        const fallbackChain = config.chain ?? (looksLikeSolana ? "solana" : null);
+        await processTokenAddress(chatId, txt, fallbackChain ?? "ethereum", config, fallbackChain === null);
         return;
       }
       return;
