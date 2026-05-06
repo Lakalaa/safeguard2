@@ -1460,15 +1460,35 @@ export function createCommandBot(token: string): TelegramBot {
     if (state.step === "await_buy_link") {
       if (!msg.text) return;
       pendingState.delete(chatId);
-      const url = msg.text.trim();
-      if (!url.startsWith("http")) {
-        await bot.sendMessage(chatId, "❌ Please paste a valid URL starting with http.");
+      const raw = msg.text.trim();
+      // Accept both "Label | URL" and plain URL
+      let buyLabel = "🛒 Buy";
+      let buyHref = raw;
+      if (raw.includes("|")) {
+        const sepIdx = raw.indexOf("|");
+        const labelPart = raw.slice(0, sepIdx).trim();
+        const urlPart = raw.slice(sepIdx + 1).trim();
+        if (urlPart.startsWith("http")) {
+          buyLabel = labelPart || "🛒 Buy";
+          buyHref = urlPart;
+        }
+      }
+      if (!buyHref.startsWith("http")) {
+        await bot.sendMessage(chatId,
+          "❌ Couldn't find a valid URL. Make sure it starts with http.
+
+Format: <code>Button Label | https://your-link.com</code>",
+          { parse_mode: "HTML" });
         return;
       }
+      // Store as "Label|||URL" so the label is preserved on alerts
       await db.update(botConfigTable)
-        .set({ buyUrl: url, updatedAt: new Date() })
+        .set({ buyUrl: `${buyLabel}|||${buyHref}`, updatedAt: new Date() })
         .where(eq(botConfigTable.id, config.id));
-      await bot.sendMessage(chatId, "✅ Buy link saved.");
+      await bot.sendMessage(chatId, `✅ Buy button saved!
+
+Button label: <b>${buyLabel}</b>
+URL: <code>${buyHref}</code>`, { parse_mode: "HTML" });
       const updated = await getOrCreate(chatId);
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running);
