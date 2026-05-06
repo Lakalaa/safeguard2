@@ -852,6 +852,36 @@ export function createCommandBot(token: string): TelegramBot {
     await sendSettings(bot, chatId, config, running);
   });
 
+  // ── /setmoji — direct emoji save (no multi-step state, survives restarts) ─
+  bot.onText(/^\/setmoji(?:@\S+)?(?:\s+(.+))?$/, async (msg, match) => {
+    if (!msg.from) return;
+    const chatId = String(msg.chat.id);
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) {
+      await bot.sendMessage(chatId, "\uD83D\uDD12 Only admins can set the emoji.");
+      return;
+    }
+    const arg = (match?.[1] ?? "").trim();
+    if (!arg) {
+      await bot.sendMessage(chatId,
+        "Usage: <code>/setmoji \uD83D\uDD25</code> or <code>/setmoji \uD83D\uDD25 5</code>\n\nFirst = emoji, optional second = count (1-10).",
+        { parse_mode: "HTML" });
+      return;
+    }
+    const parts = arg.split(/\s+/);
+    const emoji = parts[0]!.trim();
+    const countRaw = parts[1] ? parseInt(parts[1]!) : NaN;
+    const n = (!isNaN(countRaw) && countRaw >= 1 && countRaw <= 10) ? countRaw : null;
+    if (!emoji) { await bot.sendMessage(chatId, "\u274C Emoji cannot be empty."); return; }
+    const config = await getOrCreate(chatId, msg.chat.title);
+    const saveCount = n ?? config.emojiPerTier ?? 5;
+    await db.update(botConfigTable)
+      .set({ alertEmoji: emoji, emojiPerTier: saveCount, updatedAt: new Date() })
+      .where(eq(botConfigTable.id, config.id));
+    await bot.sendMessage(chatId,
+      "\u2705 Emoji set to <b>" + emoji + "</b> \u00D7" + saveCount + "\n\nPreview at min-buy: " + emoji.repeat(saveCount) + "\n\nBuy alerts will now use this emoji.",
+      { parse_mode: "HTML" });
+  });
+
   // ── /diag — API diagnostic: shows exactly which sources work from Render ─
   bot.onText(/^\/diag(@\S+)?$/, async (msg) => {
     if (!msg.from) return;
