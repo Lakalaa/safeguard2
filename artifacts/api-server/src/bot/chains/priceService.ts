@@ -5,6 +5,7 @@
 
 // ── Trending rank cache ────────────────────────────────────────────────────────
 interface BoostEntry {
+  url?: string;
   chainId: string;
   tokenAddress: string;
   amount: number;
@@ -21,7 +22,7 @@ const TRENDING_TTL_MS = 5 * 60_000; // 5 minutes
 export async function getTrendingInfo(
   tokenAddress: string,
   chainId: string,
-): Promise<{ rank: number | null; dexPaidScore: number | null }> {
+): Promise<{ rank: number | null; dexPaidScore: number | null; trendingUrl: string | null }> {
   const now = Date.now();
 
   // Refresh cache when stale
@@ -41,16 +42,21 @@ export async function getTrendingInfo(
   }
 
   const lower = tokenAddress.toLowerCase();
-  const idx = trendingCache.entries.findIndex(
+  // Try exact match (address + chain) first, then address-only fallback
+  let idx = trendingCache.entries.findIndex(
     (e) => e.tokenAddress?.toLowerCase() === lower && e.chainId?.toLowerCase() === chainId.toLowerCase(),
   );
+  if (idx === -1) {
+    idx = trendingCache.entries.findIndex((e) => e.tokenAddress?.toLowerCase() === lower);
+  }
 
-  if (idx === -1) return { rank: null, dexPaidScore: null };
+  if (idx === -1) return { rank: null, dexPaidScore: null, trendingUrl: null };
 
   const entry = trendingCache.entries[idx]!;
   return {
     rank: idx + 1,
     dexPaidScore: entry.totalAmount ?? entry.amount ?? null,
+    trendingUrl: entry.url ?? null,
   };
 }
 
