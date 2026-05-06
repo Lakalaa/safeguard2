@@ -644,7 +644,7 @@ export function createCommandBot(token: string): TelegramBot {
   ): Promise<void> {
     await bot.sendMessage(chatId, `🔍 Looking up token on DexScreener…`);
     try {
-      const dexData = await getDexScreenerData(address);
+      const dexData = await getDexScreenerData(address, chain);
       const chainId = dexData?.chainId ?? chain;
       const pairAddress = dexData?.pairAddress ?? null;
       const dextoolsChain = DEXTOOLS_CHAIN[chainId] ?? chainId;
@@ -1453,10 +1453,25 @@ Send <code>clear</code> to remove the buy link.`,
     if (msg.text?.startsWith("/")) return;
 
     const state = pendingState.get(chatId);
-    if (!state) return;
 
     // In groups, only process if admin
     if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+
+    // ── Smart fallback: if state was lost (server restart) but message looks
+    //    like a token address, use the stored chain from DB and process it ──
+    if (!state && msg.text) {
+      const txt = msg.text.trim();
+      const looksLikeSolana = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(txt);
+      const looksLikeEvm   = /^0x[0-9a-fA-F]{40}$/.test(txt);
+      if (looksLikeSolana || looksLikeEvm) {
+        const config = await getOrCreate(chatId, msg.chat.title);
+        const fallbackChain = config.chain ?? (looksLikeEvm ? "ethereum" : "solana");
+        await processTokenAddress(chatId, txt, fallbackChain, config);
+        return;
+      }
+      return;
+    }
+    if (!state) return;
 
     const config = await getOrCreate(chatId, msg.chat.title);
 
