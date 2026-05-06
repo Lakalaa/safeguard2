@@ -30,7 +30,7 @@ export async function getDexScreenerData(tokenAddress: string): Promise<DexScree
     if (!res.ok) return null;
     const data = (await res.json()) as { pairs?: DexScreenerPair[] };
     if (!data.pairs || data.pairs.length === 0) return null;
-    // Filter to the base token and sort by liquidity
+    // Prefer pairs where the configured address is the base token, then sort by liquidity
     const matching = data.pairs.filter(
       (p) => p.baseToken.address.toLowerCase() === tokenAddress.toLowerCase(),
     );
@@ -54,12 +54,23 @@ function formatNumber(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
+function buildButtonRows(
+  buttons: { text: string; url: string }[],
+): TelegramBot.InlineKeyboardButton[][] {
+  const rows: TelegramBot.InlineKeyboardButton[][] = [];
+  for (let i = 0; i < buttons.length; i += 2) {
+    rows.push(buttons.slice(i, i + 2).map((b) => ({ text: b.text, url: b.url })));
+  }
+  return rows;
+}
+
 function buildAlertMessage(params: {
   tokenName: string;
   tokenSymbol: string;
   chainName: string;
   tier: number;
   emojiPerTier: number;
+  alertEmoji: string;
   amountUsd: number;
   amountNative: number;
   nativeCurrency: string;
@@ -70,42 +81,41 @@ function buildAlertMessage(params: {
   explorerAddress: string;
   marketCap: number | null;
   priceChangePct: number | null;
-  dextUrl?: string | null;
-  screenerUrl?: string | null;
-  buyUrl?: string | null;
-  trendingUrl?: string | null;
+  priceUsd: number | null;
+  liquidity: number | null;
 }): string {
-  const circles = "🟢".repeat(params.tier * params.emojiPerTier);
+  const emoji = params.alertEmoji || "🟢";
+  const circles = emoji.repeat(params.tier * params.emojiPerTier);
   const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
   const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
 
-  const positionLine =
+  const pctLine =
     params.priceChangePct !== null
-      ? `\n🪙 Position ${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(0)}%`
+      ? `\n📈 ${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(1)}% (24h)`
       : "";
 
   const mcapLine =
     params.marketCap !== null
-      ? `\n💰 Market Cap ${formatNumber(params.marketCap)}`
+      ? `\n💰 Mkt Cap: ${formatNumber(params.marketCap)}`
       : "";
 
-  const links: string[] = [];
-  if (params.dextUrl) links.push(`<a href="${params.dextUrl}">DexT</a>`);
-  if (params.screenerUrl) links.push(`<a href="${params.screenerUrl}">Screener</a>`);
-  if (params.buyUrl) links.push(`<a href="${params.buyUrl}">Buy</a>`);
-  if (params.trendingUrl) links.push(`<a href="${params.trendingUrl}">Trending</a>`);
-  if (links.length === 0) {
-    links.push(`<a href="${buyerUrl}">Buyer</a>`);
-    links.push(`<a href="${txUrl}">TX</a>`);
-  }
+  const priceUsdLine =
+    params.priceUsd !== null && params.priceUsd > 0
+      ? `\n💵 Price: $${params.priceUsd < 0.001 ? params.priceUsd.toExponential(3) : params.priceUsd < 0.01 ? params.priceUsd.toFixed(6) : params.priceUsd.toFixed(4)}`
+      : "";
+
+  const liquidityLine =
+    params.liquidity !== null && params.liquidity > 0
+      ? `\n💧 Liq: ${formatNumber(params.liquidity)}`
+      : "";
 
   return (
     `<b>${params.tokenName} Buy!</b> <i>${params.chainName}</i>\n` +
     `${circles}\n\n` +
     `🔀 Spent <b>${formatNumber(params.amountUsd)}</b> (<b>${params.amountNative.toFixed(4)} ${params.nativeCurrency}</b>)\n` +
     `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
-    `👤 <a href="${buyerUrl}">Buyer</a> / <a href="${txUrl}">TX</a>${positionLine}${mcapLine}\n\n` +
-    links.join(" | ")
+    `👤 <a href="${buyerUrl}">Buyer</a> | <a href="${txUrl}">TX</a>` +
+    pctLine + mcapLine + priceUsdLine + liquidityLine
   );
 }
 
@@ -220,11 +230,12 @@ class BuyAlertBot {
     const dexData = await this.getCachedDexData(config.tokenAddress!);
     const marketCap = dexData?.marketCap ?? dexData?.fdv ?? null;
     const priceChangePct = dexData?.priceChange?.h24 ?? null;
+    const priceUsd = dexData?.priceUsd ? parseFloat(dexData.priceUsd) : null;
+    const liquidity = dexData?.liquidity?.usd ?? null;
 
     // Reliable USD amount: prefer what the monitor computed, but fall back to
-    // tokensReceived × current price from DexScreener. This ensures correct
-    // values for EVM token→token swaps (USDC, USDT, etc.) where tx.value = 0.
-    const tokenPriceUsd = dexData?.priceUsd ? parseFloat(dexData.priceUsd) : 0;
+    // tokensReceived × current price from DexScreener.
+    const tokenPriceUsd = priceUsd ?? 0;
     const amountUsd =
       event.amountUsd > 0.001
         ? event.amountUsd
@@ -254,17 +265,13 @@ class BuyAlertBot {
 
     if (!savedAlert) return;
 
-    // Build the alert using ALL settings the user configured:
-    // - emojiPerTier + tier thresholds → circles (🟢🟢🟢🟢)
-    // - alertImageUrl → sent as photo caption
-    // - dextUrl, screenerUrl, buyUrl, trendingUrl → action link buttons
-    // These apply to every real buy, regardless of which DEX or chain it came from
     const message = buildAlertMessage({
       tokenName: config.tokenName ?? dexData?.baseToken.name ?? "Token",
       tokenSymbol: config.tokenSymbol ?? dexData?.baseToken.symbol ?? "TKN",
       chainName: chainConfig.name,
       tier,
       emojiPerTier: config.emojiPerTier,
+      alertEmoji: config.alertEmoji ?? "🟢",
       amountUsd,
       amountNative: event.amountNative,
       nativeCurrency: chainConfig.nativeCurrency,
@@ -275,21 +282,58 @@ class BuyAlertBot {
       explorerAddress: chainConfig.explorerAddress,
       marketCap: marketCap ?? null,
       priceChangePct: priceChangePct ?? null,
-      dextUrl: config.dextUrl,
-      screenerUrl: config.screenerUrl,
-      buyUrl: config.buyUrl,
-      trendingUrl: config.trendingUrl,
+      priceUsd: priceUsd ?? null,
+      liquidity: liquidity ?? null,
     });
 
-    if (config.alertImageUrl) {
-      // Send image + alert text as caption
+    // ── Build inline keyboard buttons ─────────────────────────────────────
+    // Standard action buttons (from config)
+    const alertButtons: { text: string; url: string }[] = [];
+    if (config.dextUrl) alertButtons.push({ text: "📊 DexTools", url: config.dextUrl });
+    if (config.screenerUrl) alertButtons.push({ text: "📈 Chart", url: config.screenerUrl });
+    if (config.buyUrl) alertButtons.push({ text: "🛒 Buy", url: config.buyUrl });
+    if (config.trendingUrl) alertButtons.push({ text: "🔥 Trending", url: config.trendingUrl });
+
+    // Extra custom buttons added by the admin via /setup → Buy Buttons
+    if (config.buyButtons) {
+      try {
+        const extra = JSON.parse(config.buyButtons) as { text: string; url: string }[];
+        if (Array.isArray(extra)) alertButtons.push(...extra);
+      } catch { /* ignore malformed JSON */ }
+    }
+
+    const keyboard: TelegramBot.InlineKeyboardMarkup | undefined =
+      alertButtons.length > 0
+        ? { inline_keyboard: buildButtonRows(alertButtons) }
+        : undefined;
+
+    // ── Send alert (photo / video / animation / text) ─────────────────────
+    const baseOpts = {
+      parse_mode: "HTML" as const,
+      ...(keyboard ? { reply_markup: keyboard } : {}),
+    };
+
+    if (config.alertMediaFileId && config.alertMediaType) {
+      if (config.alertMediaType === "video") {
+        await this.bot.sendVideo(config.chatId, config.alertMediaFileId, {
+          caption: message, ...baseOpts,
+        });
+      } else if (config.alertMediaType === "animation") {
+        await this.bot.sendAnimation(config.chatId, config.alertMediaFileId, {
+          caption: message, ...baseOpts,
+        });
+      } else {
+        await this.bot.sendPhoto(config.chatId, config.alertMediaFileId, {
+          caption: message, ...baseOpts,
+        });
+      }
+    } else if (config.alertImageUrl) {
       await this.bot.sendPhoto(config.chatId, config.alertImageUrl, {
-        caption: message,
-        parse_mode: "HTML",
+        caption: message, ...baseOpts,
       });
     } else {
       await this.bot.sendMessage(config.chatId, message, {
-        parse_mode: "HTML",
+        ...baseOpts,
         disable_web_page_preview: true,
       });
     }
