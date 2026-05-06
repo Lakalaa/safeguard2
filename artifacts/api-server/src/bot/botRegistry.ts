@@ -364,7 +364,9 @@ function buildSosanaMessage(params: AlertParams): string {
   if (_buyLink) linkParts.push(`<a href="${_buyLink.url}">${_buyLink.text}</a>`);
   if (params.trendingRank !== null) {
     const trendLabel = `🔥 Trending #${params.trendingRank}`;
-    linkParts.push(params.trendingUrl ? `<a href="${params.trendingUrl}">${trendLabel}</a>` : trendLabel);
+    linkParts.push((params.trendingUrl || params.screenerUrl)
+      ? `<a href="${params.trendingUrl ?? params.screenerUrl}">${trendLabel}</a>`
+      : trendLabel);
   }
   const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
@@ -411,7 +413,9 @@ function buildWaveMessage(params: AlertParams, emojiBarStr?: string): string {
   if (_wBuyLink) linkParts.push(`<a href="${_wBuyLink.url}">${_wBuyLink.text}</a>`);
   if (params.trendingRank !== null) {
     const trendLabel = `🔥 Trending #${params.trendingRank}`;
-    linkParts.push(params.trendingUrl ? `<a href="${params.trendingUrl}">${trendLabel}</a>` : trendLabel);
+    linkParts.push((params.trendingUrl || params.screenerUrl)
+      ? `<a href="${params.trendingUrl ?? params.screenerUrl}">${trendLabel}</a>`
+      : trendLabel);
   }
   const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
@@ -463,7 +467,9 @@ function buildEvmMessage(params: AlertParams): string {
   if (_eBuyLink) linkParts.push(`<a href="${_eBuyLink.url}">${_eBuyLink.text}</a>`);
   if (params.trendingRank !== null) {
     const trendLabel = `🔥 Trending #${params.trendingRank}`;
-    linkParts.push(params.trendingUrl ? `<a href="${params.trendingUrl}">${trendLabel}</a>` : trendLabel);
+    linkParts.push((params.trendingUrl || params.screenerUrl)
+      ? `<a href="${params.trendingUrl ?? params.screenerUrl}">${trendLabel}</a>`
+      : trendLabel);
   }
   const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
@@ -517,7 +523,9 @@ function buildTrendingMessage(params: AlertParams): string {
   if (_buyLinkMsg) trendLinkParts.push(`<a href="${_buyLinkMsg.url}">${_buyLinkMsg.text}</a>`);
   if (params.trendingRank !== null) {
     const trendLabel = `🔥 Trending #${params.trendingRank}`;
-    trendLinkParts.push(params.trendingUrl ? `<a href="${params.trendingUrl}">${trendLabel}</a>` : trendLabel);
+    trendLinkParts.push((params.trendingUrl || params.screenerUrl)
+      ? `<a href="${params.trendingUrl ?? params.screenerUrl}">${trendLabel}</a>`
+      : trendLabel);
   }
   const trendLinksFooter = trendLinkParts.length > 0 ? `\n\n${trendLinkParts.join(" | ")}` : "";
 
