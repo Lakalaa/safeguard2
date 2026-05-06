@@ -1,4 +1,3 @@
-sha: 215738c30471a5f5fc930c598a525b8878e8ac3d
 import TelegramBot from "node-telegram-bot-api";
 import { db } from "@workspace/db";
 import { botConfigTable, alertsTable } from "@workspace/db";
@@ -140,24 +139,23 @@ function buildSosanaMessage(params: AlertParams): string {
   if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   const _buyLink = parseBuyLink(params.buyUrl);
   if (_buyLink) linkParts.push(`<a href="${_buyLink.url}">${_buyLink.text}</a>`);
-  if (params.trendingUrl && params.trendingRank !== null) linkParts.push(`<a href="${params.trendingUrl}">🔥 Trending #${params.trendingRank}</a>`);
-  const linksLine = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
+  const linksInline = linkParts.length > 0 ? `\n${linkParts.join(" | ")}` : "";
 
   return (
     `<b>${params.tokenName} ${buyLabel}</b>` +
     trendingLine + `\n` +
     `${emojiBar(params)}\n\n` +
     `🔀 Spent <b>${formatNumber(params.amountUsd)}</b>${nativeStr}\n` +
-    `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
+    `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>` +
+    linksInline + `\n` +
     `👤 <a href="${buyerUrl}">Buyer</a> / <a href="${txUrl}">TX</a>` +
     positionLine +
-    mcapLine +
-    linksLine
+    mcapLine
   );
 }
 
 function buildSosanaKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
-  const trendingHref = params.trendingUrl ?? params.screenerUrl ?? null;
+  const trendingHref = params.trendingRank !== null ? (params.trendingUrl ?? params.screenerUrl ?? null) : null;
   const extraRows = buildCustomButtonRows(params).inline_keyboard;
   const rows: TelegramBot.InlineKeyboardButton[][] = [];
   if (trendingHref) rows.push([{ text: "🔥 Trending", url: trendingHref }]);
@@ -206,23 +204,23 @@ function buildTrendingMessage(params: AlertParams): string {
   const trendLinkParts: string[] = [];
   if (params.dextUrl) trendLinkParts.push(`<a href="${params.dextUrl}">DexTools</a>`);
   if (params.screenerUrl) trendLinkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
-  const _buyLinkTrendMsg = parseBuyLink(params.buyUrl);
-  if (_buyLinkTrendMsg) trendLinkParts.push(`<a href="${_buyLinkTrendMsg.url}">${_buyLinkTrendMsg.text}</a>`);
-  const trendLinksLine = trendLinkParts.length > 0 ? `\n\n${trendLinkParts.join(" | ")}` : "";
+  const _buyLinkMsg = parseBuyLink(params.buyUrl);
+  if (_buyLinkMsg) trendLinkParts.push(`<a href="${_buyLinkMsg.url}">${_buyLinkMsg.text}</a>`);
+  const trendLinksInline = trendLinkParts.length > 0 ? `\n${trendLinkParts.join(" | ")}` : "";
 
   return (
     `<b>${params.tokenName} [${params.tokenSymbol}] Buy!</b>` +
     trendingHeaderLine + `\n` +
     `${emojiBar(params)}\n\n` +
     `💲| <b>${nativeStr}</b>\n` +
-    `💼| Got: <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
+    `💼| Got: <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>` +
+    trendLinksInline + `\n` +
     `👤| <a href="${buyerUrl}">${shortBuyer}</a> | <a href="${txUrl}">Txn</a>` +
     positionLine +
     mcapLine +
     socialLine +
     dexPaidLine +
-    trendingFooterLine +
-    trendLinksLine
+    trendingFooterLine
   );
 }
 
@@ -240,7 +238,7 @@ function buildCustomButtonRows(params: AlertParams): TelegramBot.InlineKeyboardM
 }
 
 function buildTrendingKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
-  const trendingHref = params.trendingUrl ?? params.screenerUrl ?? null;
+  const trendingHref = params.trendingRank !== null ? (params.trendingUrl ?? params.screenerUrl ?? null) : null;
   const extraRows = buildCustomButtonRows(params).inline_keyboard;
   const rows: TelegramBot.InlineKeyboardButton[][] = [];
   if (trendingHref) rows.push([{ text: "🔥 Trending", url: trendingHref }]);
