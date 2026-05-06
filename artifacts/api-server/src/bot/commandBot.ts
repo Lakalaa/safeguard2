@@ -131,7 +131,7 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
   const styleLabel =
     style === "trending" ? "📊 Style: Trending ✅" :
     style === "wave"     ? "🌊 Style: Wave ✅"     :
-    style === "evm"      ? "⟠ Style: EVM ✅"       :
+    style === "evm"      ? "⟠ Style: Chain ✅"     :
     "🔄 Style: SOSANA ✅";
   const hasSocial = !!(config.telegramUrl || config.twitterUrl || config.websiteUrl);
   return {
@@ -396,7 +396,7 @@ function styleKeyboard(current: string): TelegramBot.InlineKeyboardMarkup {
   return {
     inline_keyboard: [
       [btn("🔄 SOSANA", "sosana", current),   btn("📊 Trending", "trending", current)],
-      [btn("🌊 Wave",   "wave",    current),   btn("⟠ EVM",       "evm",      current)],
+      [btn("🌊 Wave",   "wave",    current),   btn("⟠ Chain",     "evm",      current)],
       [{ text: "⬅️ Back", callback_data: "action:settings" }],
     ],
   };
@@ -1039,7 +1039,7 @@ Send <code>clear</code> to remove the buy link.`,
         `🔄 <b>SOSANA</b> — Clean, simple format. Links under market cap.\n\n` +
         `📊 <b>Trending</b> — Richer format with social links and chain detail.\n\n` +
         `🌊 <b>Wave</b> — Same as SOSANA but the emoji bar animates ⚡ left→right after each alert.\n\n` +
-        `⟠ <b>EVM</b> — Chain-focused format with chain name + emoji (⟠ ETH / 🔶 BSC / 🔷 ARB / 🟣 Polygon …) and EVM address style.`,
+        `⟠ <b>Chain</b> — Works for every network: ◎ SOL, ⟠ ETH, 🔶 BSC, 🔷 ARB, ♦️ TRX, 🟣 Polygon… Shows chain emoji + shortened address.`,
         { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: styleKeyboard(current) },
       ).catch(() => null);
       return;
@@ -1053,7 +1053,7 @@ Send <code>clear</code> to remove the buy link.`,
       const updated = await getOrCreate(chatId);
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running, msgId);
-      const labels: Record<string, string> = { sosana: "SOSANA", trending: "Trending", wave: "Wave 🌊", evm: "EVM ⟠" };
+      const labels: Record<string, string> = { sosana: "SOSANA", trending: "Trending", wave: "Wave 🌊", evm: "Chain ⟠" };
       await bot.answerCallbackQuery(query.id, { text: `✅ Style set to ${labels[newStyle] ?? newStyle}` });
       return;
     }
