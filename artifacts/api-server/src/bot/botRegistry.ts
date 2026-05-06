@@ -9,6 +9,13 @@ import { EvmMonitor } from "./chains/evmMonitor";
 import { getNativePrice, getTrendingInfo } from "./chains/priceService";
 import type { BotConfig } from "@workspace/db";
 
+const DEXTOOLS_CHAIN_IDS: Record<string, string> = {
+  ethereum: "ether", bsc: "bnb", polygon: "polygon",
+  arbitrum: "arbitrum", base: "base", avalanche: "avalanche",
+  optimism: "optimism", solana: "solana",
+};
+
+
 export interface DexScreenerPair {
   pairAddress: string;
   baseToken: { address: string; name: string; symbol: string };
@@ -250,9 +257,9 @@ function parseBuyLink(raw: string | null | undefined): { text: string; url: stri
   if (!raw) return null;
   try {
     const p = JSON.parse(raw) as { text?: string; url?: string };
-    if (p.url?.startsWith("http")) return { text: p.text || "🛒 Buy", url: p.url };
+    if (p.url?.startsWith("http")) return { text: p.text || "Buy", url: p.url };
   } catch { /* not JSON */ }
-  if (raw.startsWith("http")) return { text: "🛒 Buy", url: raw };
+  if (raw.startsWith("http")) return { text: "Buy", url: raw };
   return null;
 }
 
@@ -1332,9 +1339,15 @@ class BotRegistry {
       explorerAddress: chainConfig.explorerAddress,
       marketCap: marketCap ?? null,
       priceChangePct: priceChangePct ?? null,
-      dextUrl: config.dextUrl,
-      screenerUrl: config.screenerUrl,
-      buyUrl: config.buyUrl,
+      dextUrl: config.dextUrl ?? (dexData?.pairAddress
+        ? `https://www.dextools.io/app/en/${DEXTOOLS_CHAIN_IDS[dexData.chainId ?? chainId] ?? (dexData.chainId ?? chainId)}/pair-explorer/${dexData.pairAddress}`
+        : null),
+      screenerUrl: config.screenerUrl ?? (dexData?.pairAddress
+        ? `https://dexscreener.com/${dexData.chainId ?? chainId}/${dexData.pairAddress}`
+        : null),
+      buyUrl: config.buyUrl ?? (config.tokenAddress && chainConfig
+        ? JSON.stringify({ text: chainConfig.defaultBuyLabel.replace(/🛒\s*/u, ""), url: chainConfig.defaultBuyUrl.replace("{address}", config.tokenAddress) })
+        : null),
       trendingUrl: config.trendingUrl,
       buyButtons: config.buyButtons,
       telegramUrl: config.telegramUrl,
