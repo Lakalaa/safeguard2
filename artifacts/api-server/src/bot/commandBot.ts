@@ -1041,7 +1041,7 @@ export function createCommandBot(token: string): TelegramBot {
       const e = config.alertEmoji ?? "🟢";
       const c = config.emojiPerTier ?? 5;
       await bot.sendMessage(chatId,
-        `🎨 <b>Set Alert Emoji</b>\n\nReply with the emoji to use on buy alerts.\n\nExamples: 🔥 💎 🚀 ⚡ 🐋 🟢 💰\n\nCurrent: <b>${e}</b> — scales automatically with buy size.`,
+`🎨 <b>Set Alert Emoji</b>\n\nReply with your emoji — just paste or type it.\n\nExamples: 🔥 💎 🚀 ⚡ 🐋 🟢 💰\n\nCurrent: <b>${e}</b>\nScales automatically: small buy = few, big buy = many.`,
         { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
       );
       return;
@@ -1533,29 +1533,23 @@ Send <code>clear</code> to remove the buy link.`,
         );
         return;
       }
-      pendingState.set(chatId, { step: "await_emoji_count", emoji });
+      // Save immediately — no count step, scaling is automatic
+      pendingState.delete(chatId);
+      await db.update(botConfigTable)
+        .set({ alertEmoji: emoji, updatedAt: new Date() })
+        .where(eq(botConfigTable.id, config.id));
+      const updated = await getOrCreate(chatId);
+      const { running } = botRegistry.getStatus(updated.id);
       await bot.sendMessage(chatId,
-        `✅ Emoji saved: ${emoji}\n\nNow reply with how many to show at the minimum buy amount (1–10):\nThe count will grow automatically for bigger buys.\n\nPreview at min-buy: ${emoji.repeat(5)}`,
-        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
-      );
+        `✅ Emoji set to <b>${emoji}</b> — scales automatically with buy size.\n\nPreview: ${emoji.repeat(3)} → ${emoji.repeat(6)} → ${emoji.repeat(10)}`,
+        { parse_mode: "HTML" });
+      await sendSettings(bot, chatId, updated, running);
       return;
     }
 
-    // ── Emoji count ───────────────────────────────────────────────────────
+    // ── Emoji count (legacy — kept for safety but no longer triggered) ─────
     if (state.step === "await_emoji_count") {
-      if (!msg.text) return;
-      const n = parseInt(msg.text.trim());
-      if (isNaN(n) || n < 1 || n > 10) {
-        await bot.sendMessage(chatId, "❌ Send a number between 1 and 10.");
-        return;
-      }
       pendingState.delete(chatId);
-      const emoji = state.emoji;
-      await db.update(botConfigTable)
-        .set({ alertEmoji: emoji, emojiPerTier: n, updatedAt: new Date() })
-        .where(eq(botConfigTable.id, config.id));
-      await bot.sendMessage(chatId,
-        `✅ Emoji saved! <b>${emoji}</b> ×${n} at min-buy, scales up automatically for bigger buys.`);
       const updated = await getOrCreate(chatId);
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running);
