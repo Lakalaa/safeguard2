@@ -59,18 +59,68 @@ export async function getDexScreenerData(tokenAddress: string, chainHint?: strin
     } catch (e) { logger.warn({ err: String(e), url }, "DexScreener v1 fetch error"); return null; }
   }
 
+  // GeckoTerminal chain slug map
+  const GECKO_NETWORK: Record<string, string> = {
+    solana: "solana", ethereum: "eth", bsc: "bsc", base: "base",
+    arbitrum: "arbitrum", polygon: "polygon", avalanche: "avax", optimism: "optimism",
+    ton: "ton", sui: "sui",
+  };
+
+  async function tryGeckoTerminal(chain: string): Promise<DexScreenerPair | null> {
+    const network = GECKO_NETWORK[chain.toLowerCase()] ?? chain.toLowerCase();
+    const url = `https://api.geckoterminal.com/api/v2/networks/${network}/tokens/${tokenAddress}`;
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: "application/json", "x-requested-with": "XMLHttpRequest" },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) return null;
+      const d = await res.json() as {
+        data?: {
+          attributes?: Record<string, string | number | null>;
+          relationships?: { top_pools?: { data?: { id?: string }[] } };
+        };
+      };
+      const attr = d?.data?.attributes;
+      if (!attr || !attr.name) return null;
+      // Pool address: GeckoTerminal returns "{network}_{poolAddress}" — strip prefix
+      const rawPoolId = d?.data?.relationships?.top_pools?.data?.[0]?.id ?? "";
+      const pairAddress = rawPoolId.includes("_") ? rawPoolId.split("_").slice(1).join("_") : rawPoolId;
+      // Map GeckoTerminal fields to DexScreenerPair shape (minimal subset we use)
+      return {
+        chainId: chain,
+        pairAddress,
+        baseToken: {
+          address: tokenAddress,
+          name: String(attr.name ?? ""),
+          symbol: String(attr.symbol ?? ""),
+        },
+        priceUsd: attr.price_usd != null ? String(attr.price_usd) : undefined,
+        marketCap: attr.market_cap_usd != null ? Number(attr.market_cap_usd) : undefined,
+        fdv: attr.fdv_usd != null ? Number(attr.fdv_usd) : undefined,
+        liquidity: { usd: Number(attr.total_reserve_in_usd ?? 0) },
+        volume: { h24: Number((attr.volume_usd as Record<string,number> | null)?.h24 ?? 0) },
+      } as unknown as DexScreenerPair;
+    } catch (e) { logger.warn({ err: String(e), url }, "GeckoTerminal fetch error"); return null; }
+  }
+
   // 1. Primary legacy endpoint
   const primary = await tryLegacyUrl(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
   if (primary) return primary;
 
-  // 2. Chain-specific v1 endpoint (most reliable for new tokens when chain is known)
+  // 2. Chain-specific v1 endpoint (more reliable for new tokens when chain is known)
   if (chainHint) {
     const v1 = await tryV1Url(chainHint);
     if (v1) return v1;
   }
 
   // 3. Search fallback (different rate-limit bucket)
-  return tryLegacyUrl(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(tokenAddress)}`);
+  const search = await tryLegacyUrl(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(tokenAddress)}`);
+  if (search) return search;
+
+  // 4. GeckoTerminal — completely separate API, different rate-limit/IP rules
+  if (chainHint) return tryGeckoTerminal(chainHint);
+  return null;
 }
 
 /**
@@ -144,21 +194,17 @@ function emojiBar(params: AlertParams): string {
 
 // Wave animation frames: sweeps ⚡ left→center→right then back to static
 function waveEmojiFrames(emoji: string, count: number): string[] {
-  const full = emoji.repeat(count);
-  if (count <= 2) return [full, full, full, full, full];
-  // Use the user's own emoji as the "lit" moving cluster; ▫️ for unlit positions
-  function frame(litStart: number, litLen: number): string {
-    const arr = Array(count).fill("▫️");
-    for (let i = litStart; i < Math.min(litStart + litLen, count); i++) arr[i] = emoji;
-    return arr.join("");
-  }
-  const third = Math.max(1, Math.ceil(count / 3));
+  // ALL emojis are the user's emoji throughout — bar pulses as one group
+  const base = emoji.repeat(count);
+  if (count <= 2) return [base, base, base, base, base];
+  const grow1 = emoji.repeat(count + 1);
+  const grow2 = emoji.repeat(count + 3);
   return [
-    full,                              // Frame 1 – initial (all user emoji)
-    frame(0, third),                   // Frame 2 – left sweep
-    frame(third, third),               // Frame 3 – middle sweep
-    frame(count - third, third),       // Frame 4 – right sweep
-    full,                              // Frame 5 – settle back (all user emoji)
+    base,   // Frame 1 – normal
+    grow1,  // Frame 2 – slight grow
+    grow2,  // Frame 3 – peak (all emojis, expanded)
+    grow1,  // Frame 4 – shrink back
+    base,   // Frame 5 – settled
   ];
 }
 
