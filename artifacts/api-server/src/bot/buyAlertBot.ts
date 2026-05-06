@@ -83,7 +83,6 @@ function buildAlertMessage(params: {
   priceChangePct: number | null;
   priceUsd: number | null;
   liquidity: number | null;
-  buyLabel: string | null;
   buyUrl: string | null;
 }): string {
   const emoji = params.alertEmoji || "🟢";
@@ -118,7 +117,6 @@ function buildAlertMessage(params: {
     `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `👤 <a href="${buyerUrl}">Buyer</a> | <a href="${txUrl}">TX</a>` +
     pctLine + mcapLine + priceUsdLine + liquidityLine +
-    (params.buyLabel && params.buyUrl ? `\n\n<a href="${params.buyUrl}">${params.buyLabel}</a>` : "")
   );
 }
 
@@ -287,13 +285,9 @@ class BuyAlertBot {
       priceChangePct: priceChangePct ?? null,
       priceUsd: priceUsd ?? null,
       liquidity: liquidity ?? null,
-      buyLabel: (() => {
-        if (!config.buyUrl) return null;
-        try { const p = JSON.parse(config.buyUrl) as { text?: string; url?: string }; return p.text ?? "🛒 Buy"; } catch { return "🛒 Buy"; }
-      })(),
       buyUrl: (() => {
         if (!config.buyUrl) return null;
-        try { const p = JSON.parse(config.buyUrl) as { text?: string; url?: string }; return p.url ?? config.buyUrl; } catch { return config.buyUrl; }
+        try { const p = JSON.parse(config.buyUrl) as { url?: string }; return p.url ?? config.buyUrl; } catch { return config.buyUrl; }
       })(),
     });
 
@@ -305,7 +299,11 @@ class BuyAlertBot {
     const mainRow: TelegramBot.InlineKeyboardButton[] = [];
     if (config.dextUrl) mainRow.push({ text: "📊 DexTools", url: config.dextUrl });
     if (config.screenerUrl) mainRow.push({ text: "📈 Chart", url: config.screenerUrl });
-    // Buy shown as text hyperlink in message body, not a keyboard button
+    if (config.buyUrl) {
+      const buyHref = (() => { try { const p = JSON.parse(config.buyUrl) as { url?: string }; return p.url ?? config.buyUrl; } catch { return config.buyUrl; } })();
+      const buyLabel = (() => { try { const p = JSON.parse(config.buyUrl) as { text?: string }; return p.text ?? "🛒 Buy"; } catch { return "🛒 Buy"; } })();
+      mainRow.push({ text: buyLabel, url: buyHref });
+    }
 
     const trendingHref = config.trendingUrl ?? config.screenerUrl ?? null;
 
