@@ -120,6 +120,18 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     defaultBuyUrl: "https://app.uniswap.org/swap?chain=optimism&outputCurrency={address}",
     defaultBuyLabel: "🛒 Buy on Uniswap",
   },
+  ton: {
+    id: "ton",
+    name: "TON",
+    nativeCurrency: "TON",
+    nativeCoinGeckoId: "the-open-network",
+    explorerTx: "https://tonviewer.com/transaction/{tx}",
+    explorerAddress: "https://tonviewer.com/{address}",
+    type: "evm",   // placeholder — TON monitoring not yet supported; alerts shown via DexScreener data only
+    rpcHttp: "https://toncenter.com/api/v2/jsonRPC",
+    defaultBuyUrl: "https://ston.fi/swap?outputCurrency={address}",
+    defaultBuyLabel: "🛒 Buy on Ston.fi",
+  },
 };
 
 export function getChainConfig(chainId: string): ChainConfig | null {
