@@ -984,12 +984,16 @@ export function createCommandBot(token: string): TelegramBot {
       await bot.sendMessage(chatId,
         `🛒 <b>Set Buy Link</b>
 
-Reply with your token's buy URL:
+Send the label and URL on one line, separated by <code>|</code>:
+<code>Label | https://url.com</code>
 
 Examples:
-• <code>https://raydium.io/swap/?outputMint=…</code>
-• <code>https://app.uniswap.org/swap?outputCurrency=…</code>
-• <code>https://jup.ag/swap/SOL-…</code>`,
+<code>🛒 Buy Now | https://raydium.io/swap/?outputMint=…</code>
+<code>Buy on Jupiter | https://jup.ag/swap/SOL-…</code>
+<code>🔥 Buy HORNY | https://app.uniswap.org/swap?…</code>
+
+The label will appear as a clickable link inside the alert message.
+Send <code>clear</code> to remove the buy link.`,
         { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
       );
       return;
@@ -1466,16 +1470,32 @@ Examples:
     // ── Buy link ──────────────────────────────────────────────────────────
     if (state.step === "await_buy_link") {
       if (!msg.text) return;
-      pendingState.delete(chatId);
-      const url = msg.text.trim();
-      if (!url.startsWith("http")) {
-        await bot.sendMessage(chatId, "❌ Please paste a valid URL starting with http.");
+      const raw = msg.text.trim();
+      if (raw.toLowerCase() === "clear") {
+        pendingState.delete(chatId);
+        await db.update(botConfigTable).set({ buyUrl: null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+        await bot.sendMessage(chatId, "✅ Buy link removed.", { parse_mode: "HTML" });
+        const updated = await getOrCreate(chatId);
+        const { running } = botRegistry.getStatus(updated.id);
+        await sendSettings(bot, chatId, updated, running);
         return;
       }
+      let label = "🛒 Buy";
+      let url = raw;
+      if (raw.includes("|")) {
+        const parts = raw.split("|").map((s) => s.trim());
+        label = parts[0] || "🛒 Buy";
+        url = parts[1] || "";
+      }
+      if (!url.startsWith("http")) {
+        await bot.sendMessage(chatId, "❌ URL must start with http. Format: <code>Label | https://url.com</code>", { parse_mode: "HTML" });
+        return;
+      }
+      pendingState.delete(chatId);
       await db.update(botConfigTable)
-        .set({ buyUrl: url, updatedAt: new Date() })
+        .set({ buyUrl: JSON.stringify({ text: label, url }), updatedAt: new Date() })
         .where(eq(botConfigTable.id, config.id));
-      await bot.sendMessage(chatId, "✅ Buy link saved.");
+      await bot.sendMessage(chatId, `✅ Buy link saved!\n\nLabel: <b>${label}</b>\nURL: <code>${url}</code>`, { parse_mode: "HTML" });
       const updated = await getOrCreate(chatId);
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running);
