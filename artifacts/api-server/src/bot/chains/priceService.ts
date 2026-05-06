@@ -13,7 +13,7 @@ interface BoostEntry {
 }
 
 let trendingCache: { entries: BoostEntry[]; fetchedAt: number } = { entries: [], fetchedAt: 0 };
-const TRENDING_TTL_MS = 5 * 60_000; // 5 minutes
+const TRENDING_TTL_MS = 60_000; // 1 minute — keep rank fresh
 
 /**
  * Fetch the DexScreener token boosts leaderboard and find the rank + boost score
@@ -42,19 +42,35 @@ export async function getTrendingInfo(
   }
 
   const lower = tokenAddress.toLowerCase();
-  // Try exact match (address + chain) first, then address-only fallback
-  let idx = trendingCache.entries.findIndex(
-    (e) => e.tokenAddress?.toLowerCase() === lower && e.chainId?.toLowerCase() === chainId.toLowerCase(),
-  );
-  if (idx === -1) {
-    idx = trendingCache.entries.findIndex((e) => e.tokenAddress?.toLowerCase() === lower);
+  const chain = chainId.toLowerCase();
+
+  // Filter to this chain only — rank is chain-specific (matches @trendingssol and similar)
+  const chainEntries = trendingCache.entries.filter((e) => e.chainId?.toLowerCase() === chain);
+
+  // Find token within chain entries
+  let chainIdx = chainEntries.findIndex((e) => e.tokenAddress?.toLowerCase() === lower);
+
+  // Fallback: search across all chains if not found on expected chain
+  let entry: BoostEntry | null = null;
+  let rank: number | null = null;
+  if (chainIdx !== -1) {
+    entry = chainEntries[chainIdx]!;
+    rank = chainIdx + 1;
+  } else {
+    const globalIdx = trendingCache.entries.findIndex((e) => e.tokenAddress?.toLowerCase() === lower);
+    if (globalIdx !== -1) {
+      entry = trendingCache.entries[globalIdx]!;
+      // Compute rank within that token's actual chain
+      const actualChain = entry.chainId?.toLowerCase() ?? chain;
+      const actualChainEntries = trendingCache.entries.filter((e) => e.chainId?.toLowerCase() === actualChain);
+      rank = actualChainEntries.findIndex((e) => e.tokenAddress?.toLowerCase() === lower) + 1;
+    }
   }
 
-  if (idx === -1) return { rank: null, dexPaidScore: null, trendingUrl: null };
+  if (!entry || rank === null) return { rank: null, dexPaidScore: null, trendingUrl: null };
 
-  const entry = trendingCache.entries[idx]!;
   return {
-    rank: idx + 1,
+    rank,
     dexPaidScore: entry.totalAmount ?? entry.amount ?? null,
     trendingUrl: entry.url ?? null,
   };
