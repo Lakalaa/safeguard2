@@ -116,7 +116,7 @@ function buildAlertMessage(params: {
     `🔀 Spent <b>${formatNumber(params.amountUsd)}</b> (<b>${params.amountNative.toFixed(4)} ${params.nativeCurrency}</b>)\n` +
     `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `👤 <a href="${buyerUrl}">Buyer</a> | <a href="${txUrl}">TX</a>` +
-    pctLine + mcapLine + priceUsdLine + liquidityLine +
+    pctLine + mcapLine + priceUsdLine + liquidityLine
   );
 }
 
