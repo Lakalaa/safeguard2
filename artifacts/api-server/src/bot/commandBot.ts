@@ -135,7 +135,7 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
   return {
     inline_keyboard: [
       [
-        { text: `${emoji} Emoji ×${count}`, callback_data: "cfg:emoji" },
+        { text: `${emojiDisplay(emoji)} Emoji ×${count}`, callback_data: "cfg:emoji" },
         { text: hasMedia ? "📸 Media ✅" : "📸 Add Media", callback_data: "cfg:media" },
       ],
       [
@@ -448,6 +448,32 @@ async function sendSettings(
 }
 
 // ── Bot factory — can be called for main bot or any co-bot ───────────────────
+
+// ── Custom emoji helpers ────────────────────────────────────────────────────
+// Telegram Premium custom emojis need special HTML formatting in bot messages.
+// We store them as <tg-emoji emoji-id="ID">base</tg-emoji> so .repeat() works.
+
+/** Extract custom emoji from message entities and format for storage */
+function extractEmoji(msg: { text?: string | null; sticker?: { emoji?: string } | null; entities?: Array<{ type: string; offset: number; length: number; custom_emoji_id?: string }> | null }): string {
+  // Check for custom_emoji entity (Telegram Premium animated emoji in text)
+  const customEntity = msg.entities?.find(e => e.type === "custom_emoji");
+  if (customEntity?.custom_emoji_id && msg.text) {
+    const baseChar = msg.text.slice(customEntity.offset, customEntity.offset + customEntity.length) || "🔥";
+    return `<tg-emoji emoji-id="${customEntity.custom_emoji_id}">${baseChar}</tg-emoji>`;
+  }
+  // Plain text emoji
+  if (msg.text?.trim()) return msg.text.trim();
+  // Sticker fallback
+  if (msg.sticker?.emoji) return msg.sticker.emoji;
+  return "";
+}
+
+/** Get a plain-text version for button labels (strips tg-emoji tags) */
+function emojiDisplay(stored: string): string {
+  const m = stored.match(/<tg-emoji[^>]*>([\s\S]*?)<\/tg-emoji>/);
+  return m ? m[1]! : stored;
+}
+
 export function createCommandBot(token: string): TelegramBot {
   // Init without polling first so we can clear any stale webhook
   const bot = new TelegramBot(token, { polling: false });
@@ -867,9 +893,18 @@ export function createCommandBot(token: string): TelegramBot {
         { parse_mode: "HTML" });
       return;
     }
-    const parts = arg.split(/\s+/);
-    const emoji = parts[0]!.trim();
-    const countRaw = parts[1] ? parseInt(parts[1]!) : NaN;
+    // Check if the emoji part is a Telegram Premium custom emoji
+    const setmojiCustomEntity = msg.entities?.find(e => e.type === "custom_emoji" && msg.text && e.offset > (msg.text.indexOf(arg.split(/\s+/)[0]!) - 1));
+    let emoji: string;
+    if (setmojiCustomEntity?.custom_emoji_id && msg.text) {
+      const baseChar = msg.text.slice(setmojiCustomEntity.offset, setmojiCustomEntity.offset + setmojiCustomEntity.length) || arg.split(/\s+/)[0]!;
+      emoji = `<tg-emoji emoji-id="${setmojiCustomEntity.custom_emoji_id}">${baseChar}</tg-emoji>`;
+    } else {
+      const parts = arg.split(/\s+/);
+      emoji = parts[0]!.trim();
+    }
+    const argParts = arg.split(/\s+/);
+    const countRaw = argParts[1] ? parseInt(argParts[1]!) : NaN;
     const n = (!isNaN(countRaw) && countRaw >= 1 && countRaw <= 10) ? countRaw : null;
     if (!emoji) { await bot.sendMessage(chatId, "\u274C Emoji cannot be empty."); return; }
     const config = await getOrCreate(chatId, msg.chat.title);
@@ -1041,7 +1076,7 @@ export function createCommandBot(token: string): TelegramBot {
       const e = config.alertEmoji ?? "🟢";
       const c = config.emojiPerTier ?? 5;
       await bot.sendMessage(chatId,
-`🎨 <b>Set Alert Emoji</b>\n\nReply with your emoji — just paste or type it.\n\nExamples: 🔥 💎 🚀 ⚡ 🐋 🟢 💰\n\nCurrent: <b>${e}</b>\nScales automatically: small buy = few, big buy = many.`,
+`🎨 <b>Set Alert Emoji</b>\n\nReply with your emoji — works with regular and Premium custom emojis.\n\nExamples: 🔥 💎 🚀 ⚡ 🐋 🟢 💰\n\nCurrent: <b>${e}</b>\nScales automatically: small buy = few, big buy = many.`,
         { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
       );
       return;
@@ -1521,11 +1556,8 @@ Send <code>clear</code> to remove the buy link.`,
 
     // ── Emoji ─────────────────────────────────────────────────────────────
     if (state.step === "await_emoji") {
-      // Accept text emoji, OR sticker emoji (animated/custom sticker → sticker.emoji field)
-      const emoji =
-        (msg.text?.trim()) ||
-        (msg.sticker?.emoji?.trim()) ||
-        "";
+      // Accept plain emoji, Telegram Premium custom emoji, or sticker emoji
+      const emoji = extractEmoji(msg);
       if (!emoji) {
         await bot.sendMessage(chatId,
           "⚠️ Please send a plain emoji character (e.g. 🔥 🚀 💎).\nAnimated sticker packs are not supported — copy-paste or type the emoji directly.",
