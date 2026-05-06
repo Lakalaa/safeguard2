@@ -1491,11 +1491,21 @@ Send <code>clear</code> to remove the buy link.`,
 
     // ── Emoji ─────────────────────────────────────────────────────────────
     if (state.step === "await_emoji") {
-      if (!msg.text) return;
-      const emoji = msg.text.trim();
+      // Accept text emoji, OR sticker emoji (animated/custom sticker → sticker.emoji field)
+      const emoji =
+        (msg.text?.trim()) ||
+        (msg.sticker?.emoji?.trim()) ||
+        "";
+      if (!emoji) {
+        await bot.sendMessage(chatId,
+          "⚠️ Please send a plain emoji character (e.g. 🔥 🚀 💎).\nAnimated sticker packs are not supported — copy-paste or type the emoji directly.",
+          { reply_markup: { force_reply: true, selective: true } },
+        );
+        return;
+      }
       pendingState.set(chatId, { step: "await_emoji_count", emoji });
       await bot.sendMessage(chatId,
-        `✅ Emoji: <b>${emoji}</b>\n\nNow reply with how many to show at the minimum buy amount (1–10):\nThe count will grow automatically for bigger buys.\n\nPreview at min-buy: ${emoji.repeat(5)}`,
+        `✅ Emoji saved: ${emoji}\n\nNow reply with how many to show at the minimum buy amount (1–10):\nThe count will grow automatically for bigger buys.\n\nPreview at min-buy: ${emoji.repeat(5)}`,
         { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
       );
       return;
