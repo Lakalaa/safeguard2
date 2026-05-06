@@ -139,18 +139,19 @@ function buildSosanaMessage(params: AlertParams): string {
   if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   const _buyLink = parseBuyLink(params.buyUrl);
   if (_buyLink) linkParts.push(`<a href="${_buyLink.url}">${_buyLink.text}</a>`);
-  const linksInline = linkParts.length > 0 ? `  ${linkParts.join(" | ")}` : "";
+  if (params.trendingUrl && params.trendingRank !== null) linkParts.push(`<a href="${params.trendingUrl}">🔥 Trending #${params.trendingRank}</a>`);
+  const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
   return (
     `<b>${params.tokenName} ${buyLabel}</b>` +
     trendingLine + `\n` +
     `${emojiBar(params)}\n\n` +
     `🔀 Spent <b>${formatNumber(params.amountUsd)}</b>${nativeStr}\n` +
-    `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>` +
-    linksInline + `\n` +
+    `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `👤 <a href="${buyerUrl}">Buyer</a> / <a href="${txUrl}">TX</a>` +
     positionLine +
-    mcapLine
+    mcapLine +
+    linksFooter
   );
 }
 
