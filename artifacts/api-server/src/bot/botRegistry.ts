@@ -345,10 +345,6 @@ function buildSosanaMessage(params: AlertParams): string {
   const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
   const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
 
-  const trendingLine = params.trendingRank !== null
-    ? `\n📡 Trending #${params.trendingRank}`
-    : "";
-
   const nativeStr = params.amountNative > 0
     ? ` (${params.amountNative.toFixed(3)} ${params.nativeCurrency})`
     : "";
@@ -358,7 +354,7 @@ function buildSosanaMessage(params: AlertParams): string {
     : "";
 
   const mcapLine = params.marketCap !== null
-    ? `\n💰 Market Cap <b>$${Math.round(params.marketCap).toLocaleString("en-US")}</b>`
+    ? `\n💰 Market Cap <b>${Math.round(params.marketCap).toLocaleString("en-US")}</b>`
     : "";
 
   const linkParts: string[] = [];
@@ -366,7 +362,10 @@ function buildSosanaMessage(params: AlertParams): string {
   if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   const _buyLink = parseBuyLink(params.buyUrl);
   if (_buyLink) linkParts.push(`<a href="${_buyLink.url}">${_buyLink.text}</a>`);
-  if (params.trendingUrl && params.trendingRank !== null) linkParts.push(`<a href="${params.trendingUrl}">🔥 Trending #${params.trendingRank}</a>`);
+  if (params.trendingRank !== null) {
+    const trendLabel = `🔥 Trending #${params.trendingRank}`;
+    linkParts.push(params.trendingUrl ? `<a href="${params.trendingUrl}">${trendLabel}</a>` : trendLabel);
+  }
   const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
   return (
@@ -377,8 +376,7 @@ function buildSosanaMessage(params: AlertParams): string {
     `👤 <a href="${buyerUrl}">Buyer</a> / <a href="${txUrl}">TX</a>` +
     positionLine +
     mcapLine +
-    linksFooter +
-    trendingLine
+    linksFooter
   );
 }
 
@@ -397,9 +395,6 @@ function buildWaveMessage(params: AlertParams, emojiBarStr?: string): string {
   const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
   const bar = emojiBarStr ?? emojiBar(params);
 
-  const trendingLine = params.trendingRank !== null
-    ? `\n📡 Trending #${params.trendingRank}`
-    : "";
   const nativeStr = params.amountNative > 0
     ? ` (${params.amountNative.toFixed(3)} ${params.nativeCurrency})`
     : "";
@@ -414,7 +409,10 @@ function buildWaveMessage(params: AlertParams, emojiBarStr?: string): string {
   if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   const _wBuyLink = parseBuyLink(params.buyUrl);
   if (_wBuyLink) linkParts.push(`<a href="${_wBuyLink.url}">${_wBuyLink.text}</a>`);
-  if (params.trendingUrl && params.trendingRank !== null) linkParts.push(`<a href="${params.trendingUrl}">🔥 Trending #${params.trendingRank}</a>`);
+  if (params.trendingRank !== null) {
+    const trendLabel = `🔥 Trending #${params.trendingRank}`;
+    linkParts.push(params.trendingUrl ? `<a href="${params.trendingUrl}">${trendLabel}</a>` : trendLabel);
+  }
   const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
   return (
@@ -423,8 +421,7 @@ function buildWaveMessage(params: AlertParams, emojiBarStr?: string): string {
     `🔀 Spent <b>${formatNumber(params.amountUsd)}</b>${nativeStr}\n` +
     `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `👤 <a href="${buyerUrl}">Buyer</a> / <a href="${txUrl}">TX</a>` +
-    positionLine + mcapLine + linksFooter +
-    trendingLine
+    positionLine + mcapLine + linksFooter
   );
 }
 
@@ -443,7 +440,6 @@ function buildEvmMessage(params: AlertParams): string {
     : params.buyerAddress;
   const buyLabel = params.tier === 3 ? "🐋 Whale Buy!" : "Buy!";
 
-  const trendingLine = params.trendingRank !== null ? `\n📡 Trending #${params.trendingRank}` : "";
   const nativeStr = params.amountNative > 0
     ? `${params.amountNative.toFixed(4)} ${params.nativeCurrency} (${formatNumber(params.amountUsd)})`
     : formatNumber(params.amountUsd);
@@ -465,7 +461,10 @@ function buildEvmMessage(params: AlertParams): string {
   if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   const _eBuyLink = parseBuyLink(params.buyUrl);
   if (_eBuyLink) linkParts.push(`<a href="${_eBuyLink.url}">${_eBuyLink.text}</a>`);
-  if (params.trendingUrl && params.trendingRank !== null) linkParts.push(`<a href="${params.trendingUrl}">🔥 Trending #${params.trendingRank}</a>`);
+  if (params.trendingRank !== null) {
+    const trendLabel = `🔥 Trending #${params.trendingRank}`;
+    linkParts.push(params.trendingUrl ? `<a href="${params.trendingUrl}">${trendLabel}</a>` : trendLabel);
+  }
   const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
   return (
@@ -474,8 +473,7 @@ function buildEvmMessage(params: AlertParams): string {
     `💰 <b>${nativeStr}</b>\n` +
     `🛍 Got: <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `📍 <a href="${buyerUrl}">${shortAddr}</a> | <a href="${txUrl}">Txn</a>` +
-    positionLine + mcapLine + socialLine + linksFooter +
-    trendingLine
+    positionLine + mcapLine + socialLine + linksFooter
   );
 }
 
@@ -489,11 +487,6 @@ function buildTrendingMessage(params: AlertParams): string {
   const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
   const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
   const shortBuyer = `${params.buyerAddress.slice(0, 6)}…${params.buyerAddress.slice(-4)}`;
-
-  // Trending rank line shown immediately after the title (matching reference image)
-  const trendingHeaderLine = params.trendingRank !== null
-    ? `\n📡 Trending #${params.trendingRank}`
-    : "";
 
   const nativeStr = params.amountNative > 0
     ? `${params.amountNative.toFixed(3)} ${params.nativeCurrency} (${formatNumber(params.amountUsd)})`
@@ -517,16 +510,15 @@ function buildTrendingMessage(params: AlertParams): string {
   const dexPaidLine = params.dexPaidScore !== null && params.dexPaidScore > 0
     ? `\n🐺 Dex Paid ⚡ ${Math.round(params.dexPaidScore).toLocaleString("en-US")}`
     : "";
-  const trendingFooterLine = params.trendingRank !== null
-    ? `\n🔴 Dex trending #${params.trendingRank}`
-    : "";
-
   const trendLinkParts: string[] = [];
   if (params.dextUrl) trendLinkParts.push(`<a href="${params.dextUrl}">DexTools</a>`);
   if (params.screenerUrl) trendLinkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   const _buyLinkMsg = parseBuyLink(params.buyUrl);
   if (_buyLinkMsg) trendLinkParts.push(`<a href="${_buyLinkMsg.url}">${_buyLinkMsg.text}</a>`);
-  if (params.trendingUrl && params.trendingRank !== null) trendLinkParts.push(`<a href="${params.trendingUrl}">🔥 Trending #${params.trendingRank}</a>`);
+  if (params.trendingRank !== null) {
+    const trendLabel = `🔥 Trending #${params.trendingRank}`;
+    trendLinkParts.push(params.trendingUrl ? `<a href="${params.trendingUrl}">${trendLabel}</a>` : trendLabel);
+  }
   const trendLinksFooter = trendLinkParts.length > 0 ? `\n\n${trendLinkParts.join(" | ")}` : "";
 
   return (
@@ -539,8 +531,7 @@ function buildTrendingMessage(params: AlertParams): string {
     mcapLine +
     socialLine +
     dexPaidLine +
-    trendLinksFooter +
-    trendingFooterLine
+    trendLinksFooter
   );
 }
 
