@@ -115,13 +115,36 @@ export async function getDexScreenerData(tokenAddress: string, chainHint?: strin
     });
   }
 
+  // Detect address format
+  const isEvmAddress = /^0x[0-9a-fA-F]{40}$/.test(tokenAddress);
+  const EVM_CHAINS = ["ethereum", "bsc", "base", "arbitrum", "polygon", "avalanche", "optimism"];
+
   const sources: Promise<DexScreenerPair | null>[] = [
+    // DexScreener legacy searches all chains — works even without chain hint
     tryDexLegacy(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`),
     tryDexLegacy(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(tokenAddress)}`),
   ];
+
   if (chainHint) {
+    // Chain hint provided — try v1 and GeckoTerminal for that specific chain
     sources.push(tryDexV1(chainHint));
     sources.push(tryGecko(chainHint));
+  }
+
+  // For EVM addresses: always blast all EVM chains on GeckoTerminal in parallel
+  // This is the bulletproof fallback — finds the token even if DexScreener is blocked
+  // and even if the user picked the wrong chain
+  if (isEvmAddress) {
+    const chainsToScan = chainHint
+      ? EVM_CHAINS.filter((c) => c !== chainHint) // already trying chainHint above
+      : EVM_CHAINS;
+    for (const c of chainsToScan) sources.push(tryGecko(c));
+  }
+
+  // For Solana addresses with no hint: try solana on GeckoTerminal
+  if (!chainHint && !isEvmAddress) {
+    sources.push(tryGecko("solana"));
+    sources.push(tryGecko("ton")); // TON also uses non-EVM base58-like addresses
   }
 
   return raceFirst(sources);
