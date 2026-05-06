@@ -292,7 +292,9 @@ class BuyAlertBot {
     if (config.dextUrl) alertButtons.push({ text: "📊 DexTools", url: config.dextUrl });
     if (config.screenerUrl) alertButtons.push({ text: "📈 Chart", url: config.screenerUrl });
     if (config.buyUrl) alertButtons.push({ text: "🛒 Buy", url: config.buyUrl });
-    if (config.trendingUrl) alertButtons.push({ text: "🔥 Trending", url: config.trendingUrl });
+    // Trending: use manually set URL, or fall back to DexScreener (auto-filled when token is added)
+    const trendingHref = config.trendingUrl ?? config.screenerUrl ?? null;
+    if (trendingHref) alertButtons.push({ text: "🔥 Trending", url: trendingHref });
 
     // Extra custom buttons added by the admin via /setup → Buy Buttons
     if (config.buyButtons) {
