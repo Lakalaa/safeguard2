@@ -83,6 +83,7 @@ function buildAlertMessage(params: {
   priceChangePct: number | null;
   priceUsd: number | null;
   liquidity: number | null;
+  buyLabel: string | null;
   buyUrl: string | null;
 }): string {
   const emoji = params.alertEmoji || "🟢";
@@ -116,7 +117,8 @@ function buildAlertMessage(params: {
     `🔀 Spent <b>${formatNumber(params.amountUsd)}</b> (<b>${params.amountNative.toFixed(4)} ${params.nativeCurrency}</b>)\n` +
     `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `👤 <a href="${buyerUrl}">Buyer</a> | <a href="${txUrl}">TX</a>` +
-    pctLine + mcapLine + priceUsdLine + liquidityLine
+    pctLine + mcapLine + priceUsdLine + liquidityLine +
+    (params.buyLabel && params.buyUrl ? `\n\n<a href="${params.buyUrl}">${params.buyLabel}</a>` : "")
   );
 }
 
@@ -285,7 +287,14 @@ class BuyAlertBot {
       priceChangePct: priceChangePct ?? null,
       priceUsd: priceUsd ?? null,
       liquidity: liquidity ?? null,
-      buyUrl: config.buyUrl ?? null,
+      buyLabel: (() => {
+        if (!config.buyUrl) return null;
+        try { const p = JSON.parse(config.buyUrl) as { text?: string; url?: string }; return p.text ?? "🛒 Buy"; } catch { return "🛒 Buy"; }
+      })(),
+      buyUrl: (() => {
+        if (!config.buyUrl) return null;
+        try { const p = JSON.parse(config.buyUrl) as { text?: string; url?: string }; return p.url ?? config.buyUrl; } catch { return config.buyUrl; }
+      })(),
     });
 
     // ── Build inline keyboard buttons ─────────────────────────────────────
@@ -296,7 +305,7 @@ class BuyAlertBot {
     const mainRow: TelegramBot.InlineKeyboardButton[] = [];
     if (config.dextUrl) mainRow.push({ text: "📊 DexTools", url: config.dextUrl });
     if (config.screenerUrl) mainRow.push({ text: "📈 Chart", url: config.screenerUrl });
-    if (config.buyUrl) mainRow.push({ text: "🛒 Buy", url: config.buyUrl });
+    // Buy shown as text hyperlink in message body, not a keyboard button
 
     const trendingHref = config.trendingUrl ?? config.screenerUrl ?? null;
 
