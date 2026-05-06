@@ -27,7 +27,7 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     rpcHttp: "https://api.mainnet-beta.solana.com",
     rpcHttpFallback: "https://solana.drpc.org",
     defaultBuyUrl: "https://jup.ag/swap/SOL-{address}",
-    defaultBuyLabel: "Buy on Jupiter",
+    defaultBuyLabel: "Buy",
   },
   ethereum: {
     id: "ethereum",
@@ -40,7 +40,7 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     rpcHttp: "https://eth.llamarpc.com",
     rpcHttpFallback: "https://eth.drpc.org",
     defaultBuyUrl: "https://app.uniswap.org/swap?outputCurrency={address}",
-    defaultBuyLabel: "Buy on Uniswap",
+    defaultBuyLabel: "Buy",
   },
   bsc: {
     id: "bsc",
@@ -53,7 +53,7 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     rpcHttp: "https://bsc.llamarpc.com",
     rpcHttpFallback: "https://bsc.drpc.org",
     defaultBuyUrl: "https://pancakeswap.finance/swap?outputCurrency={address}",
-    defaultBuyLabel: "Buy on PancakeSwap",
+    defaultBuyLabel: "Buy",
   },
   base: {
     id: "base",
@@ -66,7 +66,7 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     rpcHttp: "https://base.llamarpc.com",
     rpcHttpFallback: "https://base.drpc.org",
     defaultBuyUrl: "https://app.uniswap.org/swap?chain=base&outputCurrency={address}",
-    defaultBuyLabel: "Buy on Uniswap",
+    defaultBuyLabel: "Buy",
   },
   arbitrum: {
     id: "arbitrum",
@@ -79,7 +79,7 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     rpcHttp: "https://arbitrum.llamarpc.com",
     rpcHttpFallback: "https://arbitrum.drpc.org",
     defaultBuyUrl: "https://app.uniswap.org/swap?chain=arbitrum&outputCurrency={address}",
-    defaultBuyLabel: "Buy on Uniswap",
+    defaultBuyLabel: "Buy",
   },
   polygon: {
     id: "polygon",
@@ -92,7 +92,7 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     rpcHttp: "https://polygon.llamarpc.com",
     rpcHttpFallback: "https://polygon.drpc.org",
     defaultBuyUrl: "https://app.uniswap.org/swap?chain=polygon&outputCurrency={address}",
-    defaultBuyLabel: "Buy on Uniswap",
+    defaultBuyLabel: "Buy",
   },
   avalanche: {
     id: "avalanche",
@@ -105,7 +105,7 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     rpcHttp: "https://avalanche.llamarpc.com",
     rpcHttpFallback: "https://avax.drpc.org",
     defaultBuyUrl: "https://traderjoexyz.com/avalanche/trade?outputCurrency={address}",
-    defaultBuyLabel: "Buy on Trader Joe",
+    defaultBuyLabel: "Buy",
   },
   optimism: {
     id: "optimism",
@@ -118,7 +118,7 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     rpcHttp: "https://optimism.llamarpc.com",
     rpcHttpFallback: "https://optimism.drpc.org",
     defaultBuyUrl: "https://app.uniswap.org/swap?chain=optimism&outputCurrency={address}",
-    defaultBuyLabel: "Buy on Uniswap",
+    defaultBuyLabel: "Buy",
   },
   ton: {
     id: "ton",
@@ -130,7 +130,7 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     type: "evm",   // placeholder — TON monitoring not yet supported; alerts shown via DexScreener data only
     rpcHttp: "https://toncenter.com/api/v2/jsonRPC",
     defaultBuyUrl: "https://ston.fi/swap?outputCurrency={address}",
-    defaultBuyLabel: "Buy on Ston.fi",
+    defaultBuyLabel: "Buy",
   },
 };
 
