@@ -257,7 +257,7 @@ function parseBuyLink(raw: string | null | undefined): { text: string; url: stri
   if (!raw) return null;
   try {
     const p = JSON.parse(raw) as { text?: string; url?: string };
-    if (p.url?.startsWith("http")) return { text: p.text || "Buy", url: p.url };
+    if (p.url?.startsWith("http")) return { text: (p.text || "Buy").replace(/🛒\s*/u, "").trim() || "Buy", url: p.url };
   } catch { /* not JSON */ }
   if (raw.startsWith("http")) return { text: "Buy", url: raw };
   return null;
@@ -1280,10 +1280,12 @@ class BotRegistry {
     // Fetch live trending rank from DexScreener boosts leaderboard (cached 5 min)
     let trendingRank: number | null = null;
     let dexPaidScore: number | null = null;
+    let liveTrendingUrl: string | null = null;
     try {
       const trendInfo = await getTrendingInfo(config.tokenAddress!, chainId);
       trendingRank = trendInfo.rank;
       dexPaidScore = trendInfo.dexPaidScore;
+      liveTrendingUrl = trendInfo.trendingUrl;
     } catch { /* non-critical, skip */ }
     const amountUsd =
       event.amountUsd > 0.001
@@ -1350,7 +1352,7 @@ class BotRegistry {
       buyUrl: config.buyUrl ?? (config.tokenAddress && chainConfig
         ? JSON.stringify({ text: chainConfig.defaultBuyLabel.replace(/🛒\s*/u, ""), url: chainConfig.defaultBuyUrl.replace("{address}", config.tokenAddress) })
         : null),
-      trendingUrl: config.trendingUrl,
+      trendingUrl: liveTrendingUrl ?? config.trendingUrl,
       buyButtons: config.buyButtons,
       telegramUrl: config.telegramUrl,
       twitterUrl: config.twitterUrl,
