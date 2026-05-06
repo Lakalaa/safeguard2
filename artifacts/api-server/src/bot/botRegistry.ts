@@ -192,15 +192,15 @@ function buildSosanaMessage(params: AlertParams): string {
   const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
   return (
-    `<b>${params.tokenName} ${buyLabel}</b>` +
-    trendingLine + `\n` +
+    `<b>${params.tokenName} ${buyLabel}</b>\n` +
     `${emojiBar(params)}\n\n` +
     `🔀 Spent <b>${formatNumber(params.amountUsd)}</b>${nativeStr}\n` +
     `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `👤 <a href="${buyerUrl}">Buyer</a> / <a href="${txUrl}">TX</a>` +
     positionLine +
     mcapLine +
-    linksFooter
+    linksFooter +
+    trendingLine
   );
 }
 
@@ -243,13 +243,13 @@ function buildWaveMessage(params: AlertParams, emojiBarStr?: string): string {
   const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
   return (
-    `<b>${params.tokenName} ${buyLabel}</b>` +
-    trendingLine + `\n` +
+    `<b>${params.tokenName} ${buyLabel}</b>\n` +
     `${bar}\n\n` +
     `🔀 Spent <b>${formatNumber(params.amountUsd)}</b>${nativeStr}\n` +
     `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `👤 <a href="${buyerUrl}">Buyer</a> / <a href="${txUrl}">TX</a>` +
-    positionLine + mcapLine + linksFooter
+    positionLine + mcapLine + linksFooter +
+    trendingLine
   );
 }
 
@@ -294,13 +294,13 @@ function buildEvmMessage(params: AlertParams): string {
   const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
   return (
-    `${cEmoji} <b>${params.tokenName} [${params.tokenSymbol}]</b> — ${params.chainName} ${buyLabel}` +
-    trendingLine + `\n` +
+    `${cEmoji} <b>${params.tokenName} [${params.tokenSymbol}]</b> — ${params.chainName} ${buyLabel}\n` +
     `${emojiBar(params)}\n\n` +
     `💰 <b>${nativeStr}</b>\n` +
     `🛍 Got: <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `📍 <a href="${buyerUrl}">${shortAddr}</a> | <a href="${txUrl}">Txn</a>` +
-    positionLine + mcapLine + socialLine + linksFooter
+    positionLine + mcapLine + socialLine + linksFooter +
+    trendingLine
   );
 }
 
@@ -355,8 +355,7 @@ function buildTrendingMessage(params: AlertParams): string {
   const trendLinksFooter = trendLinkParts.length > 0 ? `\n\n${trendLinkParts.join(" | ")}` : "";
 
   return (
-    `<b>${params.tokenName} [${params.tokenSymbol}] Buy!</b>` +
-    trendingHeaderLine + `\n` +
+    `<b>${params.tokenName} [${params.tokenSymbol}] Buy!</b>\n` +
     `${emojiBar(params)}\n\n` +
     `💲| <b>${nativeStr}</b>\n` +
     `💼| Got: <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
@@ -365,8 +364,8 @@ function buildTrendingMessage(params: AlertParams): string {
     mcapLine +
     socialLine +
     dexPaidLine +
-    trendingFooterLine +
-    trendLinksFooter
+    trendLinksFooter +
+    trendingFooterLine
   );
 }
 
