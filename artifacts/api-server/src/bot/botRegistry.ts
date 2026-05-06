@@ -25,102 +25,106 @@ export interface DexScreenerPair {
 export async function getDexScreenerData(tokenAddress: string, chainHint?: string | null): Promise<DexScreenerPair | null> {
   const addr = tokenAddress.toLowerCase();
 
-  async function tryLegacyUrl(url: string): Promise<DexScreenerPair | null> {
+  // Compatible timeout — works across all Node versions on Render
+  function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+    return Promise.race([p, new Promise<null>((r) => setTimeout(() => r(null), ms))]);
+  }
+
+  // ── DexScreener legacy endpoint ──────────────────────────────────────────────
+  async function tryDexLegacy(url: string): Promise<DexScreenerPair | null> {
     try {
-      const res = await fetch(url, {
-        headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) { logger.warn({ status: res.status, url }, "DexScreener non-OK"); return null; }
+      const res = await withTimeout(fetch(url, {
+        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0 (compatible; TelegramBot/1.0)" },
+      }), 9_000);
+      if (!res?.ok) return null;
       const data = (await res.json()) as { pairs?: DexScreenerPair[] };
-      if (!data.pairs || data.pairs.length === 0) return null;
+      if (!data.pairs?.length) return null;
       const matching = data.pairs.filter((p) => p.baseToken.address.toLowerCase() === addr);
-      const list = matching.length > 0 ? matching : data.pairs;
+      const list = matching.length ? matching : data.pairs;
       list.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
       return list[0] ?? null;
     } catch (e) { logger.warn({ err: String(e), url }, "DexScreener fetch error"); return null; }
   }
 
-  async function tryV1Url(chain: string): Promise<DexScreenerPair | null> {
-    const url = `https://api.dexscreener.com/tokens/v1/${chain}/${tokenAddress}`;
+  // ── DexScreener v1 chain-specific endpoint ───────────────────────────────────
+  async function tryDexV1(chain: string): Promise<DexScreenerPair | null> {
     try {
-      const res = await fetch(url, {
-        headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) { logger.warn({ status: res.status, url }, "DexScreener v1 non-OK"); return null; }
+      const url = `https://api.dexscreener.com/tokens/v1/${chain}/${tokenAddress}`;
+      const res = await withTimeout(fetch(url, {
+        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0 (compatible; TelegramBot/1.0)" },
+      }), 9_000);
+      if (!res?.ok) return null;
       const data = (await res.json()) as DexScreenerPair[] | { pairs?: DexScreenerPair[] };
       const pairs: DexScreenerPair[] = Array.isArray(data) ? data : (data.pairs ?? []);
-      if (pairs.length === 0) return null;
+      if (!pairs.length) return null;
       const matching = pairs.filter((p) => p.baseToken.address.toLowerCase() === addr);
-      const list = matching.length > 0 ? matching : pairs;
+      const list = matching.length ? matching : pairs;
       list.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
       return list[0] ?? null;
-    } catch (e) { logger.warn({ err: String(e), url }, "DexScreener v1 fetch error"); return null; }
+    } catch (e) { logger.warn({ err: String(e) }, "DexScreener v1 fetch error"); return null; }
   }
 
-  // GeckoTerminal chain slug map
-  const GECKO_NETWORK: Record<string, string> = {
+  // ── GeckoTerminal — separate API, different IP/rate-limit rules ──────────────
+  const GECKO_NET: Record<string, string> = {
     solana: "solana", ethereum: "eth", bsc: "bsc", base: "base",
-    arbitrum: "arbitrum", polygon: "polygon", avalanche: "avax", optimism: "optimism",
-    ton: "ton", sui: "sui",
+    arbitrum: "arbitrum", polygon: "polygon", avalanche: "avax",
+    optimism: "optimism", ton: "ton", sui: "sui",
   };
-
-  async function tryGeckoTerminal(chain: string): Promise<DexScreenerPair | null> {
-    const network = GECKO_NETWORK[chain.toLowerCase()] ?? chain.toLowerCase();
-    const url = `https://api.geckoterminal.com/api/v2/networks/${network}/tokens/${tokenAddress}`;
+  async function tryGecko(chain: string): Promise<DexScreenerPair | null> {
     try {
-      const res = await fetch(url, {
+      const network = GECKO_NET[chain.toLowerCase()] ?? chain.toLowerCase();
+      const url = `https://api.geckoterminal.com/api/v2/networks/${network}/tokens/${tokenAddress}`;
+      const res = await withTimeout(fetch(url, {
         headers: { Accept: "application/json", "x-requested-with": "XMLHttpRequest" },
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) return null;
+      }), 9_000);
+      if (!res?.ok) return null;
       const d = await res.json() as {
         data?: {
-          attributes?: Record<string, string | number | null>;
+          attributes?: Record<string, unknown>;
           relationships?: { top_pools?: { data?: { id?: string }[] } };
         };
       };
       const attr = d?.data?.attributes;
-      if (!attr || !attr.name) return null;
-      // Pool address: GeckoTerminal returns "{network}_{poolAddress}" — strip prefix
-      const rawPoolId = d?.data?.relationships?.top_pools?.data?.[0]?.id ?? "";
+      if (!attr?.name) return null;
+      const rawPoolId = (d?.data?.relationships?.top_pools?.data?.[0]?.id ?? "") as string;
       const pairAddress = rawPoolId.includes("_") ? rawPoolId.split("_").slice(1).join("_") : rawPoolId;
-      // Map GeckoTerminal fields to DexScreenerPair shape (minimal subset we use)
       return {
-        chainId: chain,
-        pairAddress,
-        baseToken: {
-          address: tokenAddress,
-          name: String(attr.name ?? ""),
-          symbol: String(attr.symbol ?? ""),
-        },
+        chainId: chain, pairAddress,
+        baseToken: { address: tokenAddress, name: String(attr.name), symbol: String(attr.symbol ?? "") },
         priceUsd: attr.price_usd != null ? String(attr.price_usd) : undefined,
         marketCap: attr.market_cap_usd != null ? Number(attr.market_cap_usd) : undefined,
         fdv: attr.fdv_usd != null ? Number(attr.fdv_usd) : undefined,
         liquidity: { usd: Number(attr.total_reserve_in_usd ?? 0) },
-        volume: { h24: Number((attr.volume_usd as Record<string,number> | null)?.h24 ?? 0) },
+        volume: { h24: 0 },
       } as unknown as DexScreenerPair;
-    } catch (e) { logger.warn({ err: String(e), url }, "GeckoTerminal fetch error"); return null; }
+    } catch (e) { logger.warn({ err: String(e) }, "GeckoTerminal fetch error"); return null; }
   }
 
-  // 1. Primary legacy endpoint
-  const primary = await tryLegacyUrl(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
-  if (primary) return primary;
+  // ── Fire ALL sources in parallel — first non-null wins ───────────────────────
+  // This is bulletproof: if DexScreener is rate-limited from Render's IP,
+  // GeckoTerminal still succeeds. First response with data is returned immediately.
+  async function raceFirst(promises: Promise<DexScreenerPair | null>[]): Promise<DexScreenerPair | null> {
+    return new Promise((resolve) => {
+      let pending = promises.length;
+      for (const p of promises) {
+        p.then((result) => {
+          if (result !== null) { resolve(result); }
+          else if (--pending === 0) { resolve(null); }
+        }).catch(() => { if (--pending === 0) resolve(null); });
+      }
+    });
+  }
 
-  // 2. Chain-specific v1 endpoint (more reliable for new tokens when chain is known)
+  const sources: Promise<DexScreenerPair | null>[] = [
+    tryDexLegacy(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`),
+    tryDexLegacy(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(tokenAddress)}`),
+  ];
   if (chainHint) {
-    const v1 = await tryV1Url(chainHint);
-    if (v1) return v1;
+    sources.push(tryDexV1(chainHint));
+    sources.push(tryGecko(chainHint));
   }
 
-  // 3. Search fallback (different rate-limit bucket)
-  const search = await tryLegacyUrl(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(tokenAddress)}`);
-  if (search) return search;
-
-  // 4. GeckoTerminal — completely separate API, different rate-limit/IP rules
-  if (chainHint) return tryGeckoTerminal(chainHint);
-  return null;
+  return raceFirst(sources);
 }
 
 /**
@@ -1292,7 +1296,7 @@ class BotRegistry {
   private async getCachedDexData(tokenAddress: string, inst: BotInstance): Promise<DexScreenerPair | null> {
     const now = Date.now();
     if (now - inst.dexCache.fetchedAt < 30_000) return inst.dexCache.data;
-    const data = await getDexScreenerData(tokenAddress);
+    const data = await getDexScreenerData(tokenAddress, inst.chainId);
     inst.dexCache = { data, fetchedAt: now };
     return data;
   }
