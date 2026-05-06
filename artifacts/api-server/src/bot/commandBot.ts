@@ -128,7 +128,11 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
   const hasMedia = !!(config.alertMediaFileId || config.alertImageUrl);
   const min = config.minBuyUsd ?? 1;
   const style = config.alertStyle ?? "sosana";
-  const styleLabel = style === "trending" ? "📊 Style: Trending ✅" : "🔄 Style: SOSANA ✅";
+  const styleLabel =
+    style === "trending" ? "📊 Style: Trending ✅" :
+    style === "wave"     ? "🌊 Style: Wave ✅"     :
+    style === "evm"      ? "⟠ Style: EVM ✅"       :
+    "🔄 Style: SOSANA ✅";
   const hasSocial = !!(config.telegramUrl || config.twitterUrl || config.websiteUrl);
   return {
     inline_keyboard: [
@@ -386,18 +390,13 @@ async function sendVoteMenu(
 }
 
 function styleKeyboard(current: string): TelegramBot.InlineKeyboardMarkup {
+  function btn(label: string, key: string, cur: string) {
+    return { text: cur === key ? `✅ ${label}` : label, callback_data: `set:style:${key}` };
+  }
   return {
     inline_keyboard: [
-      [
-        {
-          text: current === "sosana" ? "✅ SOSANA (current)" : "🔄 SOSANA",
-          callback_data: "set:style:sosana",
-        },
-        {
-          text: current === "trending" ? "✅ Trending (current)" : "📊 Trending",
-          callback_data: "set:style:trending",
-        },
-      ],
+      [btn("🔄 SOSANA", "sosana", current),   btn("📊 Trending", "trending", current)],
+      [btn("🌊 Wave",   "wave",    current),   btn("⟠ EVM",       "evm",      current)],
       [{ text: "⬅️ Back", callback_data: "action:settings" }],
     ],
   };
@@ -1037,20 +1036,25 @@ Send <code>clear</code> to remove the buy link.`,
       const current = config.alertStyle ?? "sosana";
       await bot.editMessageText(
         `🎨 <b>Alert Style</b>\n\n` +
-        `<b>SOSANA</b> — Clean format with text links at the bottom. Simple and fast.\n\n` +
-        `<b>Trending</b> — Richer format with native-first amounts, social links (Telegram / X / Website) and inline Buy / DexTools / Screener buttons.`,
+        `🔄 <b>SOSANA</b> — Clean, simple format. Links under market cap.\n\n` +
+        `📊 <b>Trending</b> — Richer format with social links and chain detail.\n\n` +
+        `🌊 <b>Wave</b> — Same as SOSANA but the emoji bar animates ⚡ left→right after each alert.\n\n` +
+        `⟠ <b>EVM</b> — Chain-focused format with chain name + emoji (⟠ ETH / 🔶 BSC / 🔷 ARB / 🟣 Polygon …) and EVM address style.`,
         { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: styleKeyboard(current) },
       ).catch(() => null);
       return;
     }
 
-    if (data === "set:style:sosana" || data === "set:style:trending") {
-      const newStyle = data === "set:style:trending" ? "trending" : "sosana";
+    if (data.startsWith("set:style:")) {
+      const newStyle = data.replace("set:style:", "");
+      const validStyles = ["sosana", "trending", "wave", "evm"];
+      if (!validStyles.includes(newStyle)) return;
       await db.update(botConfigTable).set({ alertStyle: newStyle, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
       const updated = await getOrCreate(chatId);
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running, msgId);
-      await bot.answerCallbackQuery(query.id, { text: `✅ Style set to ${newStyle === "trending" ? "Trending" : "SOSANA"}` });
+      const labels: Record<string, string> = { sosana: "SOSANA", trending: "Trending", wave: "Wave 🌊", evm: "EVM ⟠" };
+      await bot.answerCallbackQuery(query.id, { text: `✅ Style set to ${labels[newStyle] ?? newStyle}` });
       return;
     }
 
