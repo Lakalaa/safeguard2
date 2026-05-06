@@ -226,11 +226,8 @@ function buildSosanaMessage(params: AlertParams): string {
 }
 
 function buildSosanaKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
-  const trendingHref = params.trendingRank !== null ? (params.trendingUrl ?? params.screenerUrl ?? null) : null;
   const extraRows = buildCustomButtonRows(params).inline_keyboard;
-  const rows: TelegramBot.InlineKeyboardButton[][] = [];
-  if (trendingHref) rows.push([{ text: "🔥 Trending", url: trendingHref }]);
-  rows.push(...extraRows);
+  const rows: TelegramBot.InlineKeyboardButton[][] = [...extraRows];
   return { inline_keyboard: rows };
 }
 
@@ -413,11 +410,8 @@ function buildCustomButtonRows(params: AlertParams): TelegramBot.InlineKeyboardM
 }
 
 function buildTrendingKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
-  const trendingHref = params.trendingRank !== null ? (params.trendingUrl ?? params.screenerUrl ?? null) : null;
   const extraRows = buildCustomButtonRows(params).inline_keyboard;
-  const rows: TelegramBot.InlineKeyboardButton[][] = [];
-  if (trendingHref) rows.push([{ text: "🔥 Trending", url: trendingHref }]);
-  rows.push(...extraRows);
+  const rows: TelegramBot.InlineKeyboardButton[][] = [...extraRows];
   return { inline_keyboard: rows };
 }
 
