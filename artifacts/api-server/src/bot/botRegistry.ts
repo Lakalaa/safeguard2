@@ -23,23 +23,33 @@ export interface DexScreenerPair {
 }
 
 export async function getDexScreenerData(tokenAddress: string): Promise<DexScreenerPair | null> {
-  try {
-    const res = await fetch(
-      `https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`,
-      { headers: { Accept: "application/json" } },
-    );
-    if (!res.ok) return null;
-    const data = (await res.json()) as { pairs?: DexScreenerPair[] };
-    if (!data.pairs || data.pairs.length === 0) return null;
-    const matching = data.pairs.filter(
-      (p) => p.baseToken.address.toLowerCase() === tokenAddress.toLowerCase(),
-    );
-    const list = matching.length > 0 ? matching : data.pairs;
-    list.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
-    return list[0] ?? null;
-  } catch {
-    return null;
+  async function tryUrl(url: string): Promise<DexScreenerPair | null> {
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) {
+        logger.warn({ status: res.status, url }, "DexScreener non-OK");
+        return null;
+      }
+      const data = (await res.json()) as { pairs?: DexScreenerPair[] };
+      if (!data.pairs || data.pairs.length === 0) return null;
+      const addr = tokenAddress.toLowerCase();
+      const matching = data.pairs.filter((p) => p.baseToken.address.toLowerCase() === addr);
+      const list = matching.length > 0 ? matching : data.pairs;
+      list.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
+      return list[0] ?? null;
+    } catch (e) {
+      logger.warn({ err: String(e), url }, "DexScreener fetch error");
+      return null;
+    }
   }
+  // Primary endpoint
+  const primary = await tryUrl(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
+  if (primary) return primary;
+  // Fallback: search endpoint (different rate-limit bucket)
+  return tryUrl(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(tokenAddress)}`);
 }
 
 /**
