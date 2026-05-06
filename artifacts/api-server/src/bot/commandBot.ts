@@ -1043,12 +1043,61 @@ Send <code>clear</code> to remove the buy link.`,
     // Alert style picker
     if (data === "cfg:style") {
       const current = config.alertStyle ?? "sosana";
-      await bot.editMessageText(
-        `🎨 <b>Alert Style</b>\n\n` +
-        `🔄 <b>SOSANA</b> — Clean, simple format. Links under market cap.\n\n` +
-        `📊 <b>Trending</b> — Richer format with social links and chain detail.\n\n` +
-        `🌊 <b>Wave</b> — Same as SOSANA but the emoji bar animates ⚡ left→right after each alert.\n\n` +
-        `⟠ <b>Chain</b> — Works for every network: ◎ SOL, ⟠ ETH, 🔶 BSC, 🔷 ARB, ♦️ TRX, 🟣 Polygon… Shows chain emoji + shortened address.`,
+      const tk   = config.tokenSymbol ?? "TOKEN";
+      const tname = config.tokenName  ?? "YourToken";
+      const emoji = (config.alertEmoji ?? "🟢").repeat(config.emojiPerTier ?? 5);
+      const stylePreview =
+        `🎨 <b>Choose Alert Style — Previews below:</b>\n` +
+        `<i>Tap a style to apply it instantly.</i>\n` +
+        `\n━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🔄 <b>SOSANA</b>  ${current === "sosana" ? "✅ current" : ""}\n` +
+        `<code>` +
+        `${tname} Buy!\n` +
+        `${emoji}\n\n` +
+        `🔀 Spent $500 (0.3 SOL)\n` +
+        `🔀 Got 1,000,000 ${tk}\n` +
+        `👤 Buyer / TX\n` +
+        `💰 Market Cap $5,000,000\n\n` +
+        `DexTools | Screener | Buy` +
+        `</code>\n` +
+        `\n━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📊 <b>Trending</b>  ${current === "trending" ? "✅ current" : ""}\n` +
+        `<code>` +
+        `${tname} [${tk}] Buy!\n` +
+        `📡 Trending #3\n` +
+        `${emoji}\n\n` +
+        `💲| 0.3 SOL ($500)\n` +
+        `💼| Got: 1,000,000 ${tk}\n` +
+        `👤| 0x1234…5678 | Txn\n` +
+        `📷| Market Cap: $5,000,000\n` +
+        `👥| Telegram | X | Website\n` +
+        `🔴 Dex trending #3\n\n` +
+        `DexTools | Screener | Buy` +
+        `</code>\n` +
+        `\n━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🌊 <b>Wave</b>  ${current === "wave" ? "✅ current" : ""}\n` +
+        `<code>` +
+        `${tname} Buy!\n` +
+        `${emoji}  ← animates ⚡ left→right\n\n` +
+        `🔀 Spent $500 (0.3 SOL)\n` +
+        `🔀 Got 1,000,000 ${tk}\n` +
+        `👤 Buyer / TX\n` +
+        `💰 Market Cap $5,000,000\n\n` +
+        `DexTools | Screener | Buy` +
+        `</code>\n` +
+        `\n━━━━━━━━━━━━━━━━━━━━━\n` +
+        `⟠ <b>Chain</b>  ${current === "evm" ? "✅ current" : ""}\n` +
+        `<i>Auto-detects: ◎ SOL / ⟠ ETH / 🔶 BSC / 🔷 ARB / ♦️ TRX…</i>\n` +
+        `<code>` +
+        `⟠ ${tname} [${tk}] — Ethereum Buy!\n` +
+        `${emoji}\n\n` +
+        `💰 0.25 ETH ($500)\n` +
+        `🛍 Got: 1,000,000 ${tk}\n` +
+        `📍 0x1234…5678 | Txn\n` +
+        `💎 MCap: $5,000,000\n\n` +
+        `DexTools | Screener | Buy` +
+        `</code>\n`;
+      await bot.editMessageText(stylePreview,
         { chat_id: chatId, message_id: msgId, parse_mode: "HTML", reply_markup: styleKeyboard(current) },
       ).catch(() => null);
       return;
