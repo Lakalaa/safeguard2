@@ -1,3 +1,4 @@
+sha: 215738c30471a5f5fc930c598a525b8878e8ac3d
 import TelegramBot from "node-telegram-bot-api";
 import { db } from "@workspace/db";
 import { botConfigTable, alertsTable } from "@workspace/db";
@@ -135,7 +136,7 @@ function buildSosanaMessage(params: AlertParams): string {
     : "";
 
   const linkParts: string[] = [];
-  if (params.dextUrl) linkParts.push(`<a href="${params.dextUrl}">DexT</a>`);
+  if (params.dextUrl) linkParts.push(`<a href="${params.dextUrl}">DexTools</a>`);
   if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   const _buyLink = parseBuyLink(params.buyUrl);
   if (_buyLink) linkParts.push(`<a href="${_buyLink.url}">${_buyLink.text}</a>`);
@@ -156,15 +157,9 @@ function buildSosanaMessage(params: AlertParams): string {
 }
 
 function buildSosanaKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
-  const mainRow: TelegramBot.InlineKeyboardButton[] = [];
-  if (params.dextUrl) mainRow.push({ text: "📊 DexTools", url: params.dextUrl });
-  if (params.screenerUrl) mainRow.push({ text: "📈 Chart", url: params.screenerUrl });
-  const _buyLinkSos = parseBuyLink(params.buyUrl);
-  if (_buyLinkSos) mainRow.push({ text: _buyLinkSos.text, url: _buyLinkSos.url });
   const trendingHref = params.trendingUrl ?? params.screenerUrl ?? null;
   const extraRows = buildCustomButtonRows(params).inline_keyboard;
   const rows: TelegramBot.InlineKeyboardButton[][] = [];
-  if (mainRow.length > 0) rows.push(mainRow);
   if (trendingHref) rows.push([{ text: "🔥 Trending", url: trendingHref }]);
   rows.push(...extraRows);
   return { inline_keyboard: rows };
@@ -208,6 +203,13 @@ function buildTrendingMessage(params: AlertParams): string {
     ? `\n🔴 Dex trending #${params.trendingRank}`
     : "";
 
+  const trendLinkParts: string[] = [];
+  if (params.dextUrl) trendLinkParts.push(`<a href="${params.dextUrl}">DexTools</a>`);
+  if (params.screenerUrl) trendLinkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
+  const _buyLinkTrendMsg = parseBuyLink(params.buyUrl);
+  if (_buyLinkTrendMsg) trendLinkParts.push(`<a href="${_buyLinkTrendMsg.url}">${_buyLinkTrendMsg.text}</a>`);
+  const trendLinksLine = trendLinkParts.length > 0 ? `\n\n${trendLinkParts.join(" | ")}` : "";
+
   return (
     `<b>${params.tokenName} [${params.tokenSymbol}] Buy!</b>` +
     trendingHeaderLine + `\n` +
@@ -219,7 +221,8 @@ function buildTrendingMessage(params: AlertParams): string {
     mcapLine +
     socialLine +
     dexPaidLine +
-    trendingFooterLine
+    trendingFooterLine +
+    trendLinksLine
   );
 }
 
@@ -237,15 +240,9 @@ function buildCustomButtonRows(params: AlertParams): TelegramBot.InlineKeyboardM
 }
 
 function buildTrendingKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
-  const mainRow: TelegramBot.InlineKeyboardButton[] = [];
-  if (params.dextUrl) mainRow.push({ text: "📊 DexTools", url: params.dextUrl });
-  if (params.screenerUrl) mainRow.push({ text: "📈 Chart", url: params.screenerUrl });
-  const _buyLinkTrend = parseBuyLink(params.buyUrl);
-  if (_buyLinkTrend) mainRow.push({ text: _buyLinkTrend.text, url: _buyLinkTrend.url });
   const trendingHref = params.trendingUrl ?? params.screenerUrl ?? null;
   const extraRows = buildCustomButtonRows(params).inline_keyboard;
   const rows: TelegramBot.InlineKeyboardButton[][] = [];
-  if (mainRow.length > 0) rows.push(mainRow);
   if (trendingHref) rows.push([{ text: "🔥 Trending", url: trendingHref }]);
   rows.push(...extraRows);
   return { inline_keyboard: rows };
@@ -433,7 +430,7 @@ function buildRepeatMessage(config: BotConfig, dexData: DexScreenerPair | null, 
     : `$${Math.round(liq)}`;
 
   const linkParts: string[] = [];
-  if (config.dextUrl) linkParts.push(`<a href="${config.dextUrl}">DexT</a>`);
+  if (config.dextUrl) linkParts.push(`<a href="${config.dextUrl}">DexTools</a>`);
   if (config.screenerUrl) linkParts.push(`<a href="${config.screenerUrl}">Screener</a>`);
   const _buyLinkRepeat = parseBuyLink(config.buyUrl);
   if (_buyLinkRepeat) linkParts.push(`<a href="${_buyLinkRepeat.url}">${_buyLinkRepeat.text}</a>`);
