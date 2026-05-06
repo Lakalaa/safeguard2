@@ -291,7 +291,10 @@ class BuyAlertBot {
     const alertButtons: { text: string; url: string }[] = [];
     if (config.dextUrl) alertButtons.push({ text: "📊 DexTools", url: config.dextUrl });
     if (config.screenerUrl) alertButtons.push({ text: "📈 Chart", url: config.screenerUrl });
-    if (config.buyUrl) alertButtons.push({ text: "🛒 Buy", url: config.buyUrl });
+    // Buy button: use custom URL if set, otherwise fall back to chain's default DEX
+    const buyUrl = config.buyUrl ?? (config.tokenAddress ? chainConfig.defaultBuyUrl.replace("{address}", config.tokenAddress) : null);
+    const buyLabel = config.buyUrl ? "🛒 Buy" : chainConfig.defaultBuyLabel;
+    if (buyUrl) alertButtons.push({ text: buyLabel, url: buyUrl });
     // Trending: use manually set URL, or fall back to DexScreener (auto-filled when token is added)
     const trendingHref = config.trendingUrl ?? config.screenerUrl ?? null;
     if (trendingHref) alertButtons.push({ text: "🔥 Trending", url: trendingHref });
