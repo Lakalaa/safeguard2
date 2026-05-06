@@ -291,13 +291,7 @@ class BuyAlertBot {
     const alertButtons: { text: string; url: string }[] = [];
     if (config.dextUrl) alertButtons.push({ text: "📊 DexTools", url: config.dextUrl });
     if (config.screenerUrl) alertButtons.push({ text: "📈 Chart", url: config.screenerUrl });
-    if (config.buyUrl) {
-      // buyUrl is stored as "Label|||URL" (new format) or plain URL (legacy)
-      const buyParts = config.buyUrl.split("|||");
-      const buyLabel = buyParts.length >= 2 ? (buyParts[0] ?? "🛒 Buy") : "🛒 Buy";
-      const buyHref = buyParts.length >= 2 ? (buyParts[1] ?? config.buyUrl) : config.buyUrl;
-      if (buyHref) alertButtons.push({ text: buyLabel, url: buyHref });
-    }
+    if (config.buyUrl) alertButtons.push({ text: "🛒 Buy", url: config.buyUrl });
     // Trending: use manually set URL, or fall back to DexScreener (auto-filled when token is added)
     const trendingHref = config.trendingUrl ?? config.screenerUrl ?? null;
     if (trendingHref) alertButtons.push({ text: "🔥 Trending", url: trendingHref });
