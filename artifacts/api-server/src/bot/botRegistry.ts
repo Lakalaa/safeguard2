@@ -22,34 +22,55 @@ export interface DexScreenerPair {
   url?: string;
 }
 
-export async function getDexScreenerData(tokenAddress: string): Promise<DexScreenerPair | null> {
-  async function tryUrl(url: string): Promise<DexScreenerPair | null> {
+export async function getDexScreenerData(tokenAddress: string, chainHint?: string | null): Promise<DexScreenerPair | null> {
+  const addr = tokenAddress.toLowerCase();
+
+  async function tryLegacyUrl(url: string): Promise<DexScreenerPair | null> {
     try {
       const res = await fetch(url, {
         headers: { Accept: "application/json" },
         signal: AbortSignal.timeout(10_000),
       });
-      if (!res.ok) {
-        logger.warn({ status: res.status, url }, "DexScreener non-OK");
-        return null;
-      }
+      if (!res.ok) { logger.warn({ status: res.status, url }, "DexScreener non-OK"); return null; }
       const data = (await res.json()) as { pairs?: DexScreenerPair[] };
       if (!data.pairs || data.pairs.length === 0) return null;
-      const addr = tokenAddress.toLowerCase();
       const matching = data.pairs.filter((p) => p.baseToken.address.toLowerCase() === addr);
       const list = matching.length > 0 ? matching : data.pairs;
       list.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
       return list[0] ?? null;
-    } catch (e) {
-      logger.warn({ err: String(e), url }, "DexScreener fetch error");
-      return null;
-    }
+    } catch (e) { logger.warn({ err: String(e), url }, "DexScreener fetch error"); return null; }
   }
-  // Primary endpoint
-  const primary = await tryUrl(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
+
+  async function tryV1Url(chain: string): Promise<DexScreenerPair | null> {
+    const url = `https://api.dexscreener.com/tokens/v1/${chain}/${tokenAddress}`;
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) { logger.warn({ status: res.status, url }, "DexScreener v1 non-OK"); return null; }
+      const data = (await res.json()) as DexScreenerPair[] | { pairs?: DexScreenerPair[] };
+      const pairs: DexScreenerPair[] = Array.isArray(data) ? data : (data.pairs ?? []);
+      if (pairs.length === 0) return null;
+      const matching = pairs.filter((p) => p.baseToken.address.toLowerCase() === addr);
+      const list = matching.length > 0 ? matching : pairs;
+      list.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
+      return list[0] ?? null;
+    } catch (e) { logger.warn({ err: String(e), url }, "DexScreener v1 fetch error"); return null; }
+  }
+
+  // 1. Primary legacy endpoint
+  const primary = await tryLegacyUrl(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
   if (primary) return primary;
-  // Fallback: search endpoint (different rate-limit bucket)
-  return tryUrl(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(tokenAddress)}`);
+
+  // 2. Chain-specific v1 endpoint (most reliable for new tokens when chain is known)
+  if (chainHint) {
+    const v1 = await tryV1Url(chainHint);
+    if (v1) return v1;
+  }
+
+  // 3. Search fallback (different rate-limit bucket)
+  return tryLegacyUrl(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(tokenAddress)}`);
 }
 
 /**
@@ -664,7 +685,7 @@ class BotRegistry {
     try {
       let chainId = config.chain ?? detectChainFromAddress(config.tokenAddress);
 
-      const dexData = await getDexScreenerData(config.tokenAddress);
+      const dexData = await getDexScreenerData(config.tokenAddress, config.chain ?? undefined);
       if (dexData?.chainId) chainId = dexData.chainId;
 
       const chainConfig = getChainConfig(chainId);
