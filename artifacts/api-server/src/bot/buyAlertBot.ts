@@ -116,7 +116,6 @@ function buildAlertMessage(params: {
     `🔀 Spent <b>${formatNumber(params.amountUsd)}</b> (<b>${params.amountNative.toFixed(4)} ${params.nativeCurrency}</b>)\n` +
     `🔀 Got <b>${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}</b>\n` +
     `👤 <a href="${buyerUrl}">Buyer</a> | <a href="${txUrl}">TX</a>` +
-    (params.buyUrl ? ` | <a href="${params.buyUrl}">🛒 Buy</a>` : "") +
     pctLine + mcapLine + priceUsdLine + liquidityLine
   );
 }
@@ -291,16 +290,16 @@ class BuyAlertBot {
 
     // ── Build inline keyboard buttons ─────────────────────────────────────
     // Standard action buttons (from config)
-    // Row 1: DexTools | Chart | Trending — all on one line
+    // Row 1: DexTools | Chart | Buy (buy is 3rd if set)
+    // Row 2: Trending alone
+    // Row 3+: extra custom buttons 2 per row
     const mainRow: TelegramBot.InlineKeyboardButton[] = [];
     if (config.dextUrl) mainRow.push({ text: "📊 DexTools", url: config.dextUrl });
     if (config.screenerUrl) mainRow.push({ text: "📈 Chart", url: config.screenerUrl });
-    // Buy link shown as text hyperlink inside the message, not a keyboard button
-    // Trending: use manually set URL, or fall back to DexScreener (auto-filled when token is added)
-    const trendingHref = config.trendingUrl ?? config.screenerUrl ?? null;
-    if (trendingHref) mainRow.push({ text: "🔥 Trending", url: trendingHref });
+    if (config.buyUrl) mainRow.push({ text: "🛒 Buy", url: config.buyUrl });
 
-    // Extra custom buttons added by the admin via /setup → Buy Buttons (2 per row)
+    const trendingHref = config.trendingUrl ?? config.screenerUrl ?? null;
+
     const extraButtons: { text: string; url: string }[] = [];
     if (config.buyButtons) {
       try {
@@ -311,6 +310,7 @@ class BuyAlertBot {
 
     const keyboardRows: TelegramBot.InlineKeyboardButton[][] = [];
     if (mainRow.length > 0) keyboardRows.push(mainRow);
+    if (trendingHref) keyboardRows.push([{ text: "🔥 Trending", url: trendingHref }]);
     for (let i = 0; i < extraButtons.length; i += 2) {
       keyboardRows.push(extraButtons.slice(i, i + 2).map((b) => ({ text: b.text, url: b.url })));
     }
