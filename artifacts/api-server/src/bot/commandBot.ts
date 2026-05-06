@@ -999,7 +999,7 @@ Examples:
     if (data === "cfg:buy:buttons") {
       pendingState.set(chatId, { step: "await_buy_buttons" });
       await bot.sendMessage(chatId,
-        `🔗 <b>Buy Alert Custom Buttons</b>\n\nAdd extra inline buttons that appear below every buy alert.\n\nSend one button per line:\n<code>Button Text | https://link.com</code>\n\nExample:\n<code>🗳 Vote Now | https://coinvote.cc/token/HORNY\n🔥 Trending | https://dexscreener.com\n📢 Telegram | https://t.me/yourchat</code>\n\nAdd as many buttons as you want, shown 2 per row.\nSend <code>clear</code> to remove all buttons.`,
+        `🔗 <b>Buy Alert Custom Buttons</b>\n\nAdd extra inline buttons that appear below every buy alert.\n\nSend one button per line:\n<code>Button Text | https://link.com</code>\n\nExample:\n<code>🗳 Vote Now | https://coinvote.cc/token/HORNY\n🔥 Trending | https://dexscreener.com\n📢 Telegram | https://t.me/yourchat</code>\n\nYou can add up to <b>6 buttons</b>, shown 2 per row.\nSend <code>clear</code> to remove all buttons.`,
         { parse_mode: "HTML" },
       );
       return;
@@ -1507,6 +1507,10 @@ Examples:
           return;
         }
         buttons.push({ text: btnText, url: btnUrl });
+      }
+      if (buttons.length > 6) {
+        await bot.sendMessage(chatId, `❌ Too many buttons. Maximum is <b>6</b>. You sent ${buttons.length}. Please try again with 6 or fewer.`, { parse_mode: "HTML" });
+        return;
       }
       pendingState.delete(chatId);
       await db.update(botConfigTable).set({ buyButtons: JSON.stringify(buttons), updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
