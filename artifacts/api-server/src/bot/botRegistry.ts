@@ -150,6 +150,62 @@ export async function getDexScreenerData(tokenAddress: string, chainHint?: strin
   return raceFirst(sources);
 }
 
+/** Diagnostic: test each data source individually and return status reports. */
+export async function diagnoseDex(tokenAddress: string, chainHint: string): Promise<string[]> {
+  const lines: string[] = [];
+  const addr = tokenAddress.toLowerCase();
+
+  async function probe(label: string, fn: () => Promise<Response | null>): Promise<void> {
+    try {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 8_000);
+      const res = await fn().catch(() => null);
+      clearTimeout(tid);
+      if (!res) { lines.push(`❌ ${label}: no response / timeout`); return; }
+      const txt = await res.text().catch(() => "");
+      const isHtml = txt.trim().startsWith("<");
+      if (!res.ok) {
+        lines.push(`⚠️ ${label}: HTTP ${res.status} ${isHtml ? "(HTML/block)" : txt.slice(0, 60)}`);
+        return;
+      }
+      if (isHtml) { lines.push(`⚠️ ${label}: HTTP 200 but HTML (CloudFlare challenge)`); return; }
+      try {
+        const d = JSON.parse(txt);
+        const pairsArr: unknown[] = Array.isArray(d) ? d : (d?.pairs ?? []);
+        const attrs = d?.data?.attributes;
+        if (pairsArr.length > 0) {
+          const p = pairsArr[0] as { baseToken?: { name?: string }; chainId?: string };
+          lines.push(`✅ ${label}: HTTP 200 — ${pairsArr.length} pair(s), name=${p?.baseToken?.name ?? "?"}, chain=${p?.chainId ?? "?"}`);
+        } else if (attrs?.name) {
+          lines.push(`✅ ${label}: HTTP 200 — name=${attrs.name}, sym=${attrs.symbol}`);
+        } else {
+          lines.push(`⚪ ${label}: HTTP 200 — no pairs/token data (not indexed)`);
+        }
+      } catch { lines.push(`⚠️ ${label}: HTTP 200 but JSON parse error`); }
+    } catch (e) { lines.push(`❌ ${label}: ${String(e).slice(0, 80)}`); }
+  }
+
+  const GECKO_NET: Record<string, string> = {
+    solana: "solana", ethereum: "eth", bsc: "bsc", base: "base",
+    arbitrum: "arbitrum", polygon: "polygon", avalanche: "avax", optimism: "optimism",
+  };
+  const gNet = GECKO_NET[chainHint] ?? chainHint;
+  const ua = "Mozilla/5.0 (compatible; TelegramBot/1.0)";
+
+  await Promise.all([
+    probe("DexScreener /tokens", () =>
+      fetch(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, { headers: { Accept: "application/json", "User-Agent": ua } })),
+    probe(`DexScreener v1/${chainHint}`, () =>
+      fetch(`https://api.dexscreener.com/tokens/v1/${chainHint}/${tokenAddress}`, { headers: { Accept: "application/json", "User-Agent": ua } })),
+    probe(`GeckoTerminal /${gNet}`, () =>
+      fetch(`https://api.geckoterminal.com/api/v2/networks/${gNet}/tokens/${tokenAddress}`, { headers: { Accept: "application/json", "x-requested-with": "XMLHttpRequest" } })),
+    probe("DexScreener /search", () =>
+      fetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(tokenAddress)}`, { headers: { Accept: "application/json", "User-Agent": ua } })),
+  ]);
+
+  return lines;
+}
+
 /**
  * Tier based on fixed USD thresholds configured per-bot.
  * Tier 1 (small):  below tier2Min
