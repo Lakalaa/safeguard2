@@ -943,6 +943,28 @@ export function createCommandBot(token: string): TelegramBot {
       { parse_mode: "HTML" });
   });
 
+  // ── /testalert — send a live preview of the buy alert with current settings ─
+  bot.onText(/^\/testalert(?:@\S+)?$/, async (msg) => {
+    if (!msg.from) return;
+    const chatId = String(msg.chat.id);
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    const config = await getOrCreate(chatId, msg.chat.title);
+    const emoji = config.alertEmoji || "\uD83D\uDFE2";
+    const base = Math.max(1, config.emojiPerTier ?? 5);
+    const emojiBar = emoji.repeat(base);
+    const emojiBarBig = emoji.repeat(Math.min(20, base * 2));
+    const style = config.alertStyle ?? "sosana";
+    const token = config.tokenSymbol ?? "TOKEN";
+    const testMsg =
+      `<b>\uD83E\uDDEA TEST ALERT PREVIEW</b>\n\n` +
+      `<b>Stored emoji (raw):</b> <code>${emoji.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</code>\n\n` +
+      `<b>Rendered (min buy):</b>\n${emojiBar}\n\n` +
+      `<b>Rendered (big buy):</b>\n${emojiBarBig}\n\n` +
+      `<b>Style:</b> ${style}\n<b>emoji_per_tier:</b> ${base}\n\n` +
+      `If the emoji above looks correct, your alerts will use it.\nIf it shows wrong — use <code>/setmoji</code> by replying to a sticker.`;
+    await bot.sendMessage(chatId, testMsg, { parse_mode: "HTML" });
+  });
+
   // ── /diag — API diagnostic: shows exactly which sources work from Render ─
   bot.onText(/^\/diag(@\S+)?$/, async (msg) => {
     if (!msg.from) return;
@@ -1586,8 +1608,8 @@ Send <code>clear</code> to remove the buy link.`,
       const emoji = extractEmoji(msg);
       if (!emoji) {
         await bot.sendMessage(chatId,
-          "⚠️ Please send a plain emoji character (e.g. 🔥 🚀 💎).\nAnimated sticker packs are not supported — copy-paste or type the emoji directly.",
-          { reply_markup: { force_reply: true, selective: true } },
+          "⚠️ Could not read emoji. Try:\n1. Send a plain emoji (🔥 🚀 💎)\n2. Or use <code>/setmoji</code> by replying to any sticker with that command.",
+          { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
         );
         return;
       }
