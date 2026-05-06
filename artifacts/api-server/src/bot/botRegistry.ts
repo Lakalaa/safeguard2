@@ -30,14 +30,35 @@ export async function getDexScreenerData(tokenAddress: string, chainHint?: strin
     return Promise.race([p, new Promise<null>((r) => setTimeout(() => r(null), ms))]);
   }
 
+  // Full browser headers — identical to what Chrome sends to api.dexscreener.com
+  // CloudFlare inspects these; without them the request is treated as a scraper
+  const DEX_HEADERS: Record<string, string> = {
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Origin": "https://dexscreener.com",
+    "Pragma": "no-cache",
+    "Referer": "https://dexscreener.com/",
+    "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  };
+
   // ── DexScreener legacy endpoint ──────────────────────────────────────────────
   async function tryDexLegacy(url: string): Promise<DexScreenerPair | null> {
     try {
       const res = await withTimeout(fetch(url, {
-        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0 (compatible; TelegramBot/1.0)" },
+        headers: DEX_HEADERS,
       }), 9_000);
       if (!res?.ok) return null;
-      const data = (await res.json()) as { pairs?: DexScreenerPair[] };
+      const txt = await res.text().catch(() => "");
+      if (txt.trim().startsWith("<")) return null; // CloudFlare HTML challenge
+      let data: { pairs?: DexScreenerPair[] };
+      try { data = JSON.parse(txt) as { pairs?: DexScreenerPair[] }; } catch { return null; }
       if (!data.pairs?.length) return null;
       const matching = data.pairs.filter((p) => p.baseToken.address.toLowerCase() === addr);
       const list = matching.length ? matching : data.pairs;
@@ -51,10 +72,13 @@ export async function getDexScreenerData(tokenAddress: string, chainHint?: strin
     try {
       const url = `https://api.dexscreener.com/tokens/v1/${chain}/${tokenAddress}`;
       const res = await withTimeout(fetch(url, {
-        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0 (compatible; TelegramBot/1.0)" },
+        headers: DEX_HEADERS,
       }), 9_000);
       if (!res?.ok) return null;
-      const data = (await res.json()) as DexScreenerPair[] | { pairs?: DexScreenerPair[] };
+      const txt2 = await res.text().catch(() => "");
+      if (txt2.trim().startsWith("<")) return null; // CloudFlare HTML challenge
+      let data: DexScreenerPair[] | { pairs?: DexScreenerPair[] };
+      try { data = JSON.parse(txt2) as DexScreenerPair[] | { pairs?: DexScreenerPair[] }; } catch { return null; }
       const pairs: DexScreenerPair[] = Array.isArray(data) ? data : (data.pairs ?? []);
       if (!pairs.length) return null;
       const matching = pairs.filter((p) => p.baseToken.address.toLowerCase() === addr);
@@ -165,10 +189,13 @@ export async function diagnoseDex(tokenAddress: string, chainHint: string): Prom
       const txt = await res.text().catch(() => "");
       const isHtml = txt.trim().startsWith("<");
       if (!res.ok) {
-        lines.push(`⚠️ ${label}: HTTP ${res.status} ${isHtml ? "(HTML/block)" : txt.slice(0, 60)}`);
+        lines.push(`⚠️ ${label}: HTTP ${res.status} — ${isHtml ? "HTML/CloudFlare block" : txt.slice(0, 80)}`);
         return;
       }
-      if (isHtml) { lines.push(`⚠️ ${label}: HTTP 200 but HTML (CloudFlare challenge)`); return; }
+      if (isHtml) {
+        lines.push(`⚠️ ${label}: HTTP 200 but HTML (CloudFlare JS challenge — bot detected)`);
+        return;
+      }
       try {
         const d = JSON.parse(txt);
         const pairsArr: unknown[] = Array.isArray(d) ? d : (d?.pairs ?? []);
@@ -1374,7 +1401,7 @@ class BotRegistry {
 
   private async getCachedDexData(tokenAddress: string, inst: BotInstance): Promise<DexScreenerPair | null> {
     const now = Date.now();
-    if (now - inst.dexCache.fetchedAt < 30_000) return inst.dexCache.data;
+    if (now - inst.dexCache.fetchedAt < 300_000) return inst.dexCache.data; // 5-minute cache — prevents rate-limiting on shared Render IP
     const data = await getDexScreenerData(tokenAddress, inst.chainId);
     inst.dexCache = { data, fetchedAt: now };
     return data;
