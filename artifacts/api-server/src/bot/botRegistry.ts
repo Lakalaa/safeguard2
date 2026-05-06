@@ -227,11 +227,20 @@ function buildTrendingMessage(params: AlertParams): string {
 function buildCustomButtonRows(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
   if (!params.buyButtons) return { inline_keyboard: [] };
   try {
-    const extra = JSON.parse(params.buyButtons) as { text: string; url: string }[];
-    if (!extra.length) return { inline_keyboard: [] };
+    const parsed = JSON.parse(params.buyButtons) as unknown;
+    if (!Array.isArray(parsed) || parsed.length === 0) return { inline_keyboard: [] };
+    // New format: [[{text,url},...], ...] — 2D array where each inner array is one row
+    if (Array.isArray(parsed[0])) {
+      const rows = (parsed as { text: string; url: string }[][]).map(row =>
+        row.map(b => ({ text: b.text, url: b.url }))
+      );
+      return { inline_keyboard: rows };
+    }
+    // Legacy format: [{text,url},...] — flat array, 2 per row
+    const flat = parsed as { text: string; url: string }[];
     const rows: TelegramBot.InlineKeyboardButton[][] = [];
-    for (let i = 0; i < extra.length; i += 2) {
-      rows.push(extra.slice(i, i + 2).map((b) => ({ text: b.text, url: b.url })));
+    for (let i = 0; i < flat.length; i += 2) {
+      rows.push(flat.slice(i, i + 2).map(b => ({ text: b.text, url: b.url })));
     }
     return { inline_keyboard: rows };
   } catch { return { inline_keyboard: [] }; }
