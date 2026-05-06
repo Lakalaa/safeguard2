@@ -17,7 +17,7 @@ const DEXTOOLS_CHAIN: Record<string, string> = {
 const CHAIN_LABELS: Record<string, string> = {
   ethereum: "Ethereum", solana: "Solana", bsc: "Binance",
   base: "Base", arbitrum: "Arbitrum", avalanche: "Avalanche",
-  polygon: "Polygon", optimism: "Optimism",
+  polygon: "Polygon", optimism: "Optimism", ton: "TON",
 };
 
 // ── In-memory pending state per chat ─────────────────────────────────────────
@@ -670,7 +670,10 @@ export function createCommandBot(token: string): TelegramBot {
 
       let reply = dexData
         ? `✅ <b>${name} (${sym})</b> found on <b>${CHAIN_LABELS[chainId] ?? chainId}</b>\n`
-        : `✅ Token saved on <b>${CHAIN_LABELS[chain] ?? chain}</b>\n`;
+        : `⚠️ Address saved, but token not found on DexScreener yet.\n`
+          + `📍 <code>${address}</code>\n`
+          + `Chain: <b>${CHAIN_LABELS[chain] ?? chain}</b>\n\n`
+          + `<i>Tip: Make sure you copied the correct contract address. Token name will auto-fill once DexScreener indexes it.</i>\n`;
       if (priceUsd) reply += `💵 Price: $${priceUsd.toFixed(8)}\n`;
       if (mcap) {
         const mcapStr = mcap >= 1_000_000
@@ -686,7 +689,13 @@ export function createCommandBot(token: string): TelegramBot {
       await sendSettings(bot, chatId, updated, running);
     } catch (err) {
       logger.error({ err }, "Token lookup error");
-      await bot.sendMessage(chatId, "❌ Could not look up that token. Please check the address and try again.");
+      await bot.sendMessage(chatId,
+        `❌ <b>Token lookup failed</b>\n\n`
+        + `Address tried: <code>${address}</code>\n`
+        + `Chain: <b>${CHAIN_LABELS[chain] ?? chain}</b>\n\n`
+        + `Please double-check the contract address and try again.\n`
+        + `You can also skip the lookup and start manually — the bot will still detect buys.`,
+        { parse_mode: "HTML" });
     }
   }
 
