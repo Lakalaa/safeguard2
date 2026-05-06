@@ -28,6 +28,7 @@ type PendingState =
   | { step: "await_media" }
   | { step: "await_buy_link" }
   | { step: "await_buy_buttons" }
+  | { step: "await_trending_url" }
   | { step: "await_social_telegram" }
   | { step: "await_social_twitter"; telegramUrl: string | null }
   | { step: "await_social_website"; telegramUrl: string | null; twitterUrl: string | null }
@@ -117,6 +118,7 @@ function settingsKeyboard(config: BotConfig, running: boolean): TelegramBot.Inli
       [
         { text: config.buyUrl ? "🛒 Buy Link ✅" : "🛒 Set Buy Link", callback_data: "cfg:buy" },
         { text: config.buyButtons ? "🔗 Buy Buttons ✅" : "🔗 Buy Buttons", callback_data: "cfg:buy:buttons" },
+        { text: config.trendingUrl ? "🔥 Trending ✅" : "🔥 Trending URL", callback_data: "cfg:trending" },
       ],
       [
         { text: `💵 Min: $${min}`, callback_data: "cfg:min" },
@@ -408,6 +410,7 @@ function statusText(config: BotConfig, running: boolean): string {
   );
   if (config.alertMediaFileId || config.alertImageUrl) lines.push(`<b>Alert media:</b> ✅`);
   if (config.buyUrl) lines.push(`<b>Buy link:</b> ✅`);
+  if (config.trendingUrl) lines.push(`<b>Trending link:</b> ✅`);
   if (config.dextUrl || config.screenerUrl) lines.push(`<b>DexTools / Screener:</b> ✅ auto-filled`);
   return lines.join("\n");
 }
@@ -998,6 +1001,25 @@ export function createCommandBot(token: string): TelegramBot {
       return;
     }
 
+    // Trending URL prompt
+    if (data === "cfg:trending") {
+      pendingState.set(chatId, { step: "await_trending_url" });
+      await bot.sendMessage(chatId,
+        `🔥 <b>Trending URL</b>
+
+Reply with your trending page link.
+
+Examples:
+• <code>https://dexscreener.com/solana/YOUR_PAIR</code>
+• <code>https://coinvote.cc/token/HORNY</code>
+• <code>https://t.me/yourchat</code>
+
+Send <code>clear</code> to remove.`,
+        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } },
+      );
+      return;
+    }
+
     // Alert style picker
     if (data === "cfg:style") {
       const current = config.alertStyle ?? "sosana";
@@ -1468,6 +1490,27 @@ export function createCommandBot(token: string): TelegramBot {
         .set({ buyUrl: url, updatedAt: new Date() })
         .where(eq(botConfigTable.id, config.id));
       await bot.sendMessage(chatId, "✅ Buy link saved.");
+      const updated = await getOrCreate(chatId);
+      const { running } = botRegistry.getStatus(updated.id);
+      await sendSettings(bot, chatId, updated, running);
+      return;
+    }
+
+    // ── Trending URL ─────────────────────────────────────────────────────────
+    if (state.step === "await_trending_url") {
+      if (!msg.text) return;
+      pendingState.delete(chatId);
+      const url = msg.text.trim();
+      if (url.toLowerCase() === "clear") {
+        await db.update(botConfigTable).set({ trendingUrl: null, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+        await bot.sendMessage(chatId, "✅ Trending URL cleared.");
+      } else if (!url.startsWith("http")) {
+        await bot.sendMessage(chatId, "❌ Please paste a valid URL starting with http.");
+        return;
+      } else {
+        await db.update(botConfigTable).set({ trendingUrl: url, updatedAt: new Date() }).where(eq(botConfigTable.id, config.id));
+        await bot.sendMessage(chatId, "✅ Trending URL saved.");
+      }
       const updated = await getOrCreate(chatId);
       const { running } = botRegistry.getStatus(updated.id);
       await sendSettings(bot, chatId, updated, running);
