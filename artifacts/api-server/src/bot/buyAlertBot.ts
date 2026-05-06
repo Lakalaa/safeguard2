@@ -291,26 +291,31 @@ class BuyAlertBot {
 
     // ── Build inline keyboard buttons ─────────────────────────────────────
     // Standard action buttons (from config)
-    const alertButtons: { text: string; url: string }[] = [];
-    if (config.dextUrl) alertButtons.push({ text: "📊 DexTools", url: config.dextUrl });
-    if (config.screenerUrl) alertButtons.push({ text: "📈 Chart", url: config.screenerUrl });
+    // Row 1: DexTools | Chart | Trending — all on one line
+    const mainRow: TelegramBot.InlineKeyboardButton[] = [];
+    if (config.dextUrl) mainRow.push({ text: "📊 DexTools", url: config.dextUrl });
+    if (config.screenerUrl) mainRow.push({ text: "📈 Chart", url: config.screenerUrl });
     // Buy link shown as text hyperlink inside the message, not a keyboard button
     // Trending: use manually set URL, or fall back to DexScreener (auto-filled when token is added)
     const trendingHref = config.trendingUrl ?? config.screenerUrl ?? null;
-    if (trendingHref) alertButtons.push({ text: "🔥 Trending", url: trendingHref });
+    if (trendingHref) mainRow.push({ text: "🔥 Trending", url: trendingHref });
 
-    // Extra custom buttons added by the admin via /setup → Buy Buttons
+    // Extra custom buttons added by the admin via /setup → Buy Buttons (2 per row)
+    const extraButtons: { text: string; url: string }[] = [];
     if (config.buyButtons) {
       try {
         const extra = JSON.parse(config.buyButtons) as { text: string; url: string }[];
-        if (Array.isArray(extra)) alertButtons.push(...extra);
+        if (Array.isArray(extra)) extraButtons.push(...extra);
       } catch { /* ignore malformed JSON */ }
     }
 
+    const keyboardRows: TelegramBot.InlineKeyboardButton[][] = [];
+    if (mainRow.length > 0) keyboardRows.push(mainRow);
+    for (let i = 0; i < extraButtons.length; i += 2) {
+      keyboardRows.push(extraButtons.slice(i, i + 2).map((b) => ({ text: b.text, url: b.url })));
+    }
     const keyboard: TelegramBot.InlineKeyboardMarkup | undefined =
-      alertButtons.length > 0
-        ? { inline_keyboard: buildButtonRows(alertButtons) }
-        : undefined;
+      keyboardRows.length > 0 ? { inline_keyboard: keyboardRows } : undefined;
 
     // ── Send alert (photo / video / animation / text) ─────────────────────
     const baseOpts = {
