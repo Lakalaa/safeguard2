@@ -303,9 +303,11 @@ interface AlertParams {
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 function emojiBar(params: AlertParams): string {
   const emoji = params.alertEmoji || "🟢";
-  const perTier = Math.max(1, params.emojiPerTier ?? 5);
-  // tier 1 = 1×, tier 2 = 2×, tier 3 = 3×
-  const count = perTier * params.tier;
+  const base = Math.max(1, params.emojiPerTier ?? 5);
+  const minBuy = Math.max(1, params.minBuyUsd ?? 1);
+  // Dynamic: scales with buy amount — small buy gets few, large buy gets many
+  // sqrt gives a natural feel: 1× at minBuy, 2× at 4×minBuy, 3× at 9×minBuy, cap 20
+  const count = Math.max(1, Math.min(20, Math.round(base * Math.sqrt(params.amountUsd / minBuy))));
   return emoji.repeat(count);
 }
 
@@ -348,7 +350,7 @@ function chainEmoji(chainName: string): string {
 // ── Style 1: SOSANA (default) ──────────────────────────────────────────────────
 // Clean, text-link format matching the SOSANA/BOBO reference look.
 function buildSosanaMessage(params: AlertParams): string {
-  const buyLabel = params.tier === 3 ? "🐋 Whale Buy!" : "Buy!";
+  const buyLabel = "Buy!";
   const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
   const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
 
@@ -399,7 +401,7 @@ function buildSosanaKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMar
 // Same layout as SOSANA but emoji bar animates after sending.
 // buildWaveMessage accepts an optional emojiBarStr to override for animation frames.
 function buildWaveMessage(params: AlertParams, emojiBarStr?: string): string {
-  const buyLabel = params.tier === 3 ? "🐋 Whale Buy!" : "Buy!";
+  const buyLabel = "Buy!";
   const buyerUrl = params.explorerAddress.replace("{address}", params.buyerAddress);
   const txUrl = params.explorerTx.replace("{tx}", params.txSignature);
   const bar = emojiBarStr ?? emojiBar(params);
@@ -449,7 +451,7 @@ function buildEvmMessage(params: AlertParams): string {
   const shortAddr = params.buyerAddress.length > 10
     ? `${params.buyerAddress.slice(0, 6)}…${params.buyerAddress.slice(-4)}`
     : params.buyerAddress;
-  const buyLabel = params.tier === 3 ? "🐋 Whale Buy!" : "Buy!";
+  const buyLabel = "Buy!";
 
   const nativeStr = params.amountNative > 0
     ? `${params.amountNative.toFixed(4)} ${params.nativeCurrency} (${formatNumber(params.amountUsd)})`
@@ -1365,7 +1367,7 @@ class BotRegistry {
 
     const isWaveStyle = alertParams.alertStyle === "wave";
     const waveFrames = isWaveStyle
-      ? waveEmojiFrames(alertParams.alertEmoji || "🟢", (alertParams.emojiPerTier ?? 5) * alertParams.tier)
+      ? waveEmojiFrames(alertParams.alertEmoji || "🟢", Math.max(1, Math.min(20, Math.round((alertParams.emojiPerTier ?? 5) * Math.sqrt(alertParams.amountUsd / Math.max(1, alertParams.minBuyUsd ?? 1))))))
       : [];
 
     const alertTokens = [token, ...(config.coBotToken ? [config.coBotToken] : [])];
