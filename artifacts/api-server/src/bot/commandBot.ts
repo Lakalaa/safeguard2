@@ -454,6 +454,17 @@ async function sendSettings(
 // Telegram Premium custom emojis need special HTML formatting in bot messages.
 // We store them as <tg-emoji emoji-id="ID">base</tg-emoji> so .repeat() works.
 
+/**
+ * Custom emoji sticker packs often have "money" emojis (🤑 💵 💲 💰 💸) as their
+ * associated fallback character — set by the sticker creator, not us.
+ * When non-premium users or unsupported clients render the alert, they see that
+ * character instead of the animation. Replace it with 🐶 so it stays on-brand.
+ */
+function sanitizeCustomEmojiFallback(base: string): string {
+  const moneyEmojis = new Set(["🤑", "💵", "💲", "💰", "💸", "🤑"]);
+  return moneyEmojis.has(base.trim()) ? "🐶" : (base || "🐶");
+}
+
 /** Extract custom emoji from message entities and format for storage */
 function extractEmoji(msg: {
   text?: string | null;
@@ -462,7 +473,7 @@ function extractEmoji(msg: {
 }): string {
   // 1. Custom emoji STICKER (Telegram Premium animated emoji sent as sticker)
   if (msg.sticker?.type === "custom_emoji" && msg.sticker.custom_emoji_id) {
-    const base = msg.sticker.emoji ?? "\uD83D\uDD25";
+    const base = sanitizeCustomEmojiFallback(msg.sticker.emoji ?? "🐶");
     return `<tg-emoji emoji-id="${msg.sticker.custom_emoji_id}">${base}</tg-emoji>`;
   }
   // 2. Regular / animated / video sticker — use its base emoji character
@@ -470,7 +481,7 @@ function extractEmoji(msg: {
   // 3. Telegram Premium custom emoji inline in text (entity type custom_emoji)
   const customEntity = msg.entities?.find(e => e.type === "custom_emoji");
   if (customEntity?.custom_emoji_id && msg.text) {
-    const baseChar = msg.text.slice(customEntity.offset, customEntity.offset + customEntity.length) || "\uD83D\uDD25";
+    const baseChar = sanitizeCustomEmojiFallback(msg.text.slice(customEntity.offset, customEntity.offset + customEntity.length) || "🐶");
     return `<tg-emoji emoji-id="${customEntity.custom_emoji_id}">${baseChar}</tg-emoji>`;
   }
   // 4. Plain text emoji
@@ -907,7 +918,8 @@ export function createCommandBot(token: string): TelegramBot {
       const st = replied.sticker;
       if (st.type === "custom_emoji" && st.custom_emoji_id) {
         // Custom emoji sticker: embed as <tg-emoji> in the alert text
-        emoji = `<tg-emoji emoji-id="${st.custom_emoji_id}">${st.emoji ?? "🔥"}</tg-emoji>`;
+        // Use sanitized fallback so money emojis (🤑 etc set by sticker creator) don't leak through
+        emoji = `<tg-emoji emoji-id="${st.custom_emoji_id}">${sanitizeCustomEmojiFallback(st.emoji ?? "🐶")}</tg-emoji>`;
       } else {
         // Regular/animated sticker: save file_id and send as sticker with each alert
         const config = await getOrCreate(chatId, msg.chat.title);
@@ -929,7 +941,8 @@ export function createCommandBot(token: string): TelegramBot {
       // (bot_command entity won't be type "custom_emoji" so this is safe)
       const customEntity = msg.entities?.find(e => e.type === "custom_emoji");
       if (customEntity?.custom_emoji_id && msg.text) {
-        const baseChar = msg.text.slice(customEntity.offset, customEntity.offset + customEntity.length) || argRaw.split(/\s+/)[0]!;
+        const rawChar = msg.text.slice(customEntity.offset, customEntity.offset + customEntity.length) || argRaw.split(/\s+/)[0]!;
+        const baseChar = sanitizeCustomEmojiFallback(rawChar);
         emoji = `<tg-emoji emoji-id="${customEntity.custom_emoji_id}">${baseChar}</tg-emoji>`;
       } else {
         // Plain emoji — just take first token after command
@@ -961,9 +974,11 @@ export function createCommandBot(token: string): TelegramBot {
     const isCustom = emoji.startsWith("<tg-emoji");
     await bot.sendMessage(chatId,
       `\u2705 Emoji saved!\n\n` +
-      (isCustom ? `Custom animated emoji captured (base: <b>${display}</b>)\n` : `Emoji: <b>${display}</b>\n`) +
+      (isCustom
+        ? `✨ Animated emoji saved! Non-Telegram-Premium users will see: <b>${display}</b>\n`
+        : `Emoji: <b>${display}</b>\n`) +
       `\nPreview (small → big):\n${emoji.repeat(3)} → ${emoji.repeat(6)} → ${emoji.repeat(10)}\n\n` +
-      `<i>If this is wrong, type e.g. <code>/setmoji 🔥</code> to set a plain emoji directly.</i>`,
+      `<i>To use a plain emoji instead, type e.g. <code>/setmoji 🐶</code></i>`,
       { parse_mode: "HTML" });
   });
 
