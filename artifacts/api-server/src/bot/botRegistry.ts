@@ -1408,15 +1408,18 @@ class BotRegistry {
             await tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy fallback failed"));
           }
         } else {
-          const mediaOpts = { caption: message, parse_mode: "HTML" as const, reply_markup: keyboard };
-          let mediaSent = false;
+          // Send alert TEXT first (full width, links, buttons visible),
+          // then video/animation immediately after with no caption (full width).
+          // This matches the standard buy-bot format: text on top, video below.
+          await tgBot.sendMessage(config.chatId, message, {
+            parse_mode: "HTML",
+            disable_web_page_preview: true,
+            reply_markup: keyboard,
+          }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed"));
           if (mediaType === "animation") {
-            mediaSent = await tgBot.sendAnimation(config.chatId, mediaSrc, mediaOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy animation failed"); return false; });
+            await tgBot.sendAnimation(config.chatId, mediaSrc).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy animation failed"));
           } else {
-            mediaSent = await tgBot.sendVideo(config.chatId, mediaSrc, mediaOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy video failed"); return false; });
-          }
-          if (!mediaSent) {
-            await tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy fallback failed"));
+            await tgBot.sendVideo(config.chatId, mediaSrc).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy video failed"));
           }
         }
       } else {
