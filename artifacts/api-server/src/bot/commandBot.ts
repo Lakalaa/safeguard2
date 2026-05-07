@@ -902,8 +902,24 @@ export function createCommandBot(token: string): TelegramBot {
     const argRaw = (match?.[1] ?? "").trim();
 
     // ── Method 1: reply to any sticker / emoji message with /setmoji ──────
-    const replied = (msg as any).reply_to_message as typeof msg | undefined;
-    if (replied) {
+    const replied = (msg as any).reply_to_message as (typeof msg & { sticker?: TelegramBot.Sticker & { custom_emoji_id?: string; type?: string } }) | undefined;
+    if (replied?.sticker && replied.sticker.file_id) {
+      const st = replied.sticker;
+      if (st.type === "custom_emoji" && st.custom_emoji_id) {
+        // Custom emoji sticker: embed as <tg-emoji> in the alert text
+        emoji = `<tg-emoji emoji-id="${st.custom_emoji_id}">${st.emoji ?? "🔥"}</tg-emoji>`;
+      } else {
+        // Regular/animated sticker: save file_id and send as sticker with each alert
+        const config = await getOrCreate(chatId, msg.chat.title);
+        await db.update(botConfigTable)
+          .set({ alertMediaFileId: st.file_id, alertMediaType: "sticker", updatedAt: new Date() })
+          .where(eq(botConfigTable.id, config.id));
+        await bot.sendMessage(chatId,
+          `✅ Sticker saved! It will be sent with every buy alert.`,
+          { reply_to_message_id: msg.message_id });
+        return;
+      }
+    } else if (replied) {
       emoji = extractEmoji(replied as Parameters<typeof extractEmoji>[0]);
     }
 
@@ -922,10 +938,13 @@ export function createCommandBot(token: string): TelegramBot {
     }
 
     if (!emoji) {
-      // Enter sticker-waiting mode — next sticker from this admin is saved immediately
+      // Enter sticker-waiting mode — next sticker is saved immediately
       pendingState.set(chatId, { step: "await_sticker" });
       await bot.sendMessage(chatId,
-        `🎨 <b>Set Alert Sticker</b>\n\nNow send any sticker — it will be sent with every buy alert.`,
+        `🎨 <b>Set Alert Sticker / Emoji</b>\n\n` +
+        `<b>Option 1:</b> Send any sticker now — it will appear with every buy alert.\n` +
+        `<b>Option 2:</b> Reply to any existing sticker with <code>/setmoji</code>\n` +
+        `<b>Option 3:</b> Type <code>/setmoji 🔥</code> to use a plain emoji`,
         { parse_mode: "HTML" });
       return;
     }
