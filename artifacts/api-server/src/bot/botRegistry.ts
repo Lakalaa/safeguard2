@@ -1401,12 +1401,17 @@ class BotRegistry {
       } else if (mediaFileId || mediaUrl) {
         const mediaSrc = (mediaFileId ?? mediaUrl) as string;
         const mediaOpts = { caption: message, parse_mode: "HTML" as const, reply_markup: keyboard };
+        let mediaSent = false;
         if (mediaType === "video") {
-          await tgBot.sendVideo(config.chatId, mediaSrc, mediaOpts).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy video failed"));
+          mediaSent = await tgBot.sendVideo(config.chatId, mediaSrc, mediaOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy video failed"); return false; });
         } else if (mediaType === "animation") {
-          await tgBot.sendAnimation(config.chatId, mediaSrc, mediaOpts).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy animation failed"));
+          mediaSent = await tgBot.sendAnimation(config.chatId, mediaSrc, mediaOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy animation failed"); return false; });
         } else {
-          await tgBot.sendPhoto(config.chatId, mediaSrc, mediaOpts).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy photo failed"));
+          mediaSent = await tgBot.sendPhoto(config.chatId, mediaSrc, mediaOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy photo failed"); return false; });
+        }
+        // Fallback: if media send failed, send plain text so the alert is never lost
+        if (!mediaSent) {
+          await tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy fallback message failed"));
         }
       } else {
         const sent = await tgBot.sendMessage(config.chatId, message, {
