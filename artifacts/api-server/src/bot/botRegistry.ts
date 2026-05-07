@@ -1379,7 +1379,26 @@ class BotRegistry {
     const alertTokens = [token, ...(config.coBotToken ? [config.coBotToken] : [])];
     for (const tk of alertTokens) {
       const tgBot = new TelegramBot(tk, { polling: false });
-      if (mediaFileId || mediaUrl) {
+      if (mediaType === "sticker" && mediaFileId) {
+        // Send sticker as a separate message first (sendSticker doesn't support captions)
+        await tgBot.sendSticker(config.chatId, mediaFileId).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy sticker failed"));
+        // Then send the alert text
+        const sent = await tgBot.sendMessage(config.chatId, message, {
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+          reply_markup: keyboard,
+        }).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed"); return null; });
+        if (isWaveStyle && sent?.message_id && waveFrames.length > 1) {
+          void (async () => {
+            const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+            for (let i = 1; i < waveFrames.length; i++) {
+              await delay(400);
+              const frameMsg = buildAlertMessage(alertParams, waveFrames[i]);
+              await tgBot.editMessageText(frameMsg, { chat_id: config.chatId, message_id: sent.message_id, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard }).catch(() => {});
+            }
+          })();
+        }
+      } else if (mediaFileId || mediaUrl) {
         const mediaSrc = (mediaFileId ?? mediaUrl) as string;
         const mediaOpts = { caption: message, parse_mode: "HTML" as const, reply_markup: keyboard };
         if (mediaType === "video") {
