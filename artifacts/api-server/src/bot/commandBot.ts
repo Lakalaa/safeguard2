@@ -906,18 +906,16 @@ export function createCommandBot(token: string): TelegramBot {
       emoji = extractEmoji(replied as Parameters<typeof extractEmoji>[0]);
     }
 
-    // ── Method 2: inline emoji after command (/setmoji 🔥) ───────────────
+    // ── Method 2: inline emoji after command (/setmoji 🔥 or /setmoji <custom>) ──
     if (!emoji && argRaw) {
-      // Find where the arg starts in the full text to locate entities
-      const cmdText = msg.text ?? "";
-      const argOffset = cmdText.indexOf(argRaw);
-      const customEntity = msg.entities?.find(
-        e => e.type === "custom_emoji" && argOffset >= 0 && e.offset >= argOffset
-      );
+      // Simple: find the FIRST custom_emoji entity anywhere in the message
+      // (bot_command entity won't be type "custom_emoji" so this is safe)
+      const customEntity = msg.entities?.find(e => e.type === "custom_emoji");
       if (customEntity?.custom_emoji_id && msg.text) {
         const baseChar = msg.text.slice(customEntity.offset, customEntity.offset + customEntity.length) || argRaw.split(/\s+/)[0]!;
         emoji = `<tg-emoji emoji-id="${customEntity.custom_emoji_id}">${baseChar}</tg-emoji>`;
       } else {
+        // Plain emoji — just take first token after command
         emoji = argRaw.split(/\s+/)[0]!.trim();
       }
     }
