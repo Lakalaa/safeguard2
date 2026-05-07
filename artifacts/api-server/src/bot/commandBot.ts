@@ -1596,24 +1596,20 @@ Send <code>clear</code> to remove the buy link.`,
     }
   });
 
-  // ── Sticker detector: admin sends sticker → offer inline confirm to set as alert emoji ──
-  bot.on("message", async (msg) => {
-    if (!(msg as any).sticker || !msg.from) return;
-    if (msg.chat.type === "private") return;
+  // ── Sticker detector: admin/owner sends sticker anywhere → offer confirm button ──
+  bot.on("sticker", async (msg) => {
+    if (!msg.from) return;
     const chatId = String(msg.chat.id);
-    if (!(await isAdmin(bot, chatId, msg.from.id))) return;
 
-    const sticker = (msg as any).sticker as {
-      emoji?: string | null;
-      type?: string | null;
-      custom_emoji_id?: string | null;
-      set_name?: string | null;
-    };
+    // In groups: admin only. In private: always respond.
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+
+    const sticker = msg.sticker as TelegramBot.Sticker & { custom_emoji_id?: string };
 
     let callbackData: string;
     let previewEmoji: string;
 
-    if (sticker.type === "custom_emoji" && sticker.custom_emoji_id) {
+    if ((sticker as any).type === "custom_emoji" && sticker.custom_emoji_id) {
       const base = sticker.emoji ?? "🔥";
       const emojiId = sticker.custom_emoji_id;
       previewEmoji = `<tg-emoji emoji-id="${emojiId}">${base}</tg-emoji>`;
