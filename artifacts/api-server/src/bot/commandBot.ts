@@ -921,9 +921,11 @@ export function createCommandBot(token: string): TelegramBot {
     }
 
     if (!emoji) {
+      // No reply and no inline emoji — enter guided sticker flow
+      pendingState.set(chatId, { step: "await_emoji" });
       await bot.sendMessage(chatId,
-        `<b>\uD83C\uDFA8 Set Alert Emoji</b>\n\n<b>Option 1 — Reply to a sticker:</b>\nSend any sticker in the chat, then reply to it with <code>/setmoji</code>\nWorks with animated, static, and custom emoji stickers.\n\n<b>Option 2 — Inline:</b>\n<code>/setmoji \uD83D\uDD25</code>\nType or paste any emoji after the command.`,
-        { parse_mode: "HTML" });
+        `🎨 <b>Set Alert Emoji</b>\n\nSend me the animated sticker you want to use as the alert emoji.\n\nJust send it directly — I'll capture it automatically!`,
+        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
       return;
     }
 
