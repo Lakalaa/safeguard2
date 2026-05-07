@@ -1400,18 +1400,37 @@ class BotRegistry {
         }
       } else if (mediaFileId || mediaUrl) {
         const mediaSrc = (mediaFileId ?? mediaUrl) as string;
-        const mediaOpts = { caption: message, parse_mode: "HTML" as const, reply_markup: keyboard };
-        let mediaSent = false;
-        if (mediaType === "video") {
-          mediaSent = await tgBot.sendVideo(config.chatId, mediaSrc, mediaOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy video failed"); return false; });
-        } else if (mediaType === "animation") {
-          mediaSent = await tgBot.sendAnimation(config.chatId, mediaSrc, mediaOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy animation failed"); return false; });
+        if (mediaType === "photo") {
+          // Photos: caption is fine, custom emoji works in photo captions
+          const photoOpts = { caption: message, parse_mode: "HTML" as const, reply_markup: keyboard };
+          const photoSent = await tgBot.sendPhoto(config.chatId, mediaSrc, photoOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy photo failed"); return false; });
+          if (!photoSent) {
+            await tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy fallback failed"));
+          }
         } else {
-          mediaSent = await tgBot.sendPhoto(config.chatId, mediaSrc, mediaOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy photo failed"); return false; });
-        }
-        // Fallback: if media send failed, send plain text so the alert is never lost
-        if (!mediaSent) {
-          await tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy fallback message failed"));
+          // Video/animation: send media with NO caption first, then text separately
+          // This ensures <tg-emoji> custom emoji renders as animated in the text message
+          if (mediaType === "animation") {
+            await tgBot.sendAnimation(config.chatId, mediaSrc).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy animation failed"));
+          } else {
+            await tgBot.sendVideo(config.chatId, mediaSrc).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy video failed"));
+          }
+          // Then send the alert text as a proper message (custom emoji renders here)
+          const sent = await tgBot.sendMessage(config.chatId, message, {
+            parse_mode: "HTML",
+            disable_web_page_preview: true,
+            reply_markup: keyboard,
+          }).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed"); return null; });
+          if (isWaveStyle && sent?.message_id && waveFrames.length > 1) {
+            void (async () => {
+              const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+              for (let i = 1; i < waveFrames.length; i++) {
+                await delay(400);
+                const frameMsg = buildAlertMessage(alertParams, waveFrames[i]);
+                await tgBot.editMessageText(frameMsg, { chat_id: config.chatId, message_id: sent.message_id, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard }).catch(() => {});
+              }
+            })();
+          }
         }
       } else {
         const sent = await tgBot.sendMessage(config.chatId, message, {
