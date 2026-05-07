@@ -1343,11 +1343,11 @@ class BotRegistry {
       explorerAddress: chainConfig.explorerAddress,
       marketCap: marketCap ?? null,
       priceChangePct: priceChangePct ?? null,
-      dextUrl: config.dextUrl ?? (dexData?.pairAddress
-        ? `https://www.dextools.io/app/en/${DEXTOOLS_CHAIN_IDS[dexData.chainId ?? chainId] ?? (dexData.chainId ?? chainId)}/pair-explorer/${dexData.pairAddress}`
+      dextUrl: config.dextUrl ?? (config.tokenAddress
+        ? `https://www.dextools.io/app/en/${DEXTOOLS_CHAIN_IDS[dexData?.chainId ?? chainId] ?? (dexData?.chainId ?? chainId)}/pair-explorer/${config.tokenAddress}`
         : null),
-      screenerUrl: config.screenerUrl ?? (dexData?.pairAddress
-        ? `https://dexscreener.com/${dexData.chainId ?? chainId}/${dexData.pairAddress}`
+      screenerUrl: config.screenerUrl ?? (config.tokenAddress
+        ? `https://dexscreener.com/${dexData?.chainId ?? chainId}/${config.tokenAddress}`
         : null),
       buyUrl: config.buyUrl ?? (config.tokenAddress && chainConfig
         ? JSON.stringify({ text: chainConfig.defaultBuyLabel.replace(/🛒\s*/u, ""), url: chainConfig.defaultBuyUrl.replace("{address}", config.tokenAddress) })
