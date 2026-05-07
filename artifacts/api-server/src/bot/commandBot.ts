@@ -1607,7 +1607,7 @@ Send <code>clear</code> to remove the buy link.`,
     }
   });
 
-  // ── Sticker detector: admin sends sticker → immediately save as alert emoji ──
+  // ── Sticker detector: admin sends sticker → ask to confirm before saving ──
   bot.on("sticker", async (msg) => {
     if (!msg.from) return;
     const chatId = String(msg.chat.id);
@@ -1616,30 +1616,29 @@ Send <code>clear</code> to remove the buy link.`,
     if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
 
     const sticker = msg.sticker as TelegramBot.Sticker & { custom_emoji_id?: string; type?: string };
-    const config = await getOrCreate(chatId, msg.chat.title);
 
-    let emoji: string;
-    if (sticker.type === "custom_emoji" && sticker.custom_emoji_id) {
-      // Premium animated custom emoji sticker — preserve full tag so it animates
-      const base = sticker.emoji ?? "🔥";
-      emoji = `<tg-emoji emoji-id="${sticker.custom_emoji_id}">${base}</tg-emoji>`;
-    } else if (sticker.emoji) {
-      // Regular / animated sticker — use its emoji character
-      emoji = sticker.emoji;
-    } else {
-      return;
-    }
+    // Only handle custom_emoji stickers — regular pack stickers can't animate in text
+    if (sticker.type !== "custom_emoji" || !sticker.custom_emoji_id) return;
 
-    await db.update(botConfigTable)
-      .set({ alertEmoji: emoji, updatedAt: new Date() })
-      .where(eq(botConfigTable.id, config.id));
+    const base = sticker.emoji ?? "🔥";
+    const emojiId = sticker.custom_emoji_id;
+    const emoji = `<tg-emoji emoji-id="${emojiId}">${base}</tg-emoji>`;
+    const callbackData = `setmoji_custom:${emojiId}:${base}`;
 
-    const isCustom = emoji.startsWith("<tg-emoji");
+    if (Buffer.byteLength(callbackData, "utf8") > 64) return;
+
     await bot.sendMessage(chatId,
-      `✅ Alert emoji saved!\n\n` +
-      (isCustom ? `Animated emoji: ${emoji}\n` : `Emoji: ${emoji}\n`) +
-      `\nPreview: ${emoji.repeat(3)} → ${emoji.repeat(6)} → ${emoji.repeat(10)}`,
-      { parse_mode: "HTML", reply_to_message_id: msg.message_id },
+      `${emoji} Set this as your alert emoji?`,
+      {
+        parse_mode: "HTML",
+        reply_to_message_id: msg.message_id,
+        reply_markup: {
+          inline_keyboard: [[
+            { text: "✅ Yes", callback_data: callbackData },
+            { text: "❌ No", callback_data: "setmoji_cancel" },
+          ]],
+        },
+      },
     );
   });
 
@@ -1656,21 +1655,29 @@ Send <code>clear</code> to remove the buy link.`,
     // In groups, only process if admin
     if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
 
-    // ── Custom emoji paste: admin sends inline animated emoji → save immediately ──
+    // ── Custom emoji paste: admin sends inline animated emoji → ask to confirm ──
     {
       const customEnt = msg.entities?.find((e: any) => e.type === "custom_emoji");
       if (!pendingState.get(chatId) && customEnt && (customEnt as any).custom_emoji_id && msg.text) {
         const emojiId = (customEnt as any).custom_emoji_id as string;
         const baseChar = msg.text.slice(customEnt.offset, customEnt.offset + customEnt.length) || "🔥";
         const emoji = `<tg-emoji emoji-id="${emojiId}">${baseChar}</tg-emoji>`;
-        const cfg = await getOrCreate(chatId, msg.chat.title);
-        await db.update(botConfigTable)
-          .set({ alertEmoji: emoji, updatedAt: new Date() })
-          .where(eq(botConfigTable.id, cfg.id));
-        await bot.sendMessage(chatId,
-          `✅ Alert emoji saved!\n\nAnimated emoji: ${emoji}\n\nPreview: ${emoji.repeat(3)} → ${emoji.repeat(6)} → ${emoji.repeat(10)}`,
-          { parse_mode: "HTML", reply_to_message_id: msg.message_id },
-        );
+        const callbackData = `setmoji_custom:${emojiId}:${baseChar}`;
+        if (Buffer.byteLength(callbackData, "utf8") <= 64) {
+          await bot.sendMessage(chatId,
+            `${emoji} Set this as your alert emoji?`,
+            {
+              parse_mode: "HTML",
+              reply_to_message_id: msg.message_id,
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: "✅ Yes", callback_data: callbackData },
+                  { text: "❌ No", callback_data: "setmoji_cancel" },
+                ]],
+              },
+            },
+          );
+        }
         return;
       }
     }
