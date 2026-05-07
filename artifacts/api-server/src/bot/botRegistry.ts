@@ -1343,12 +1343,16 @@ class BotRegistry {
       explorerAddress: chainConfig.explorerAddress,
       marketCap: marketCap ?? null,
       priceChangePct: priceChangePct ?? null,
-      dextUrl: config.dextUrl ?? (config.tokenAddress
-        ? `https://www.dextools.io/app/en/${DEXTOOLS_CHAIN_IDS[dexData?.chainId ?? chainId] ?? (dexData?.chainId ?? chainId)}/pair-explorer/${config.tokenAddress}`
+      dextUrl: config.dextUrl ?? (dexData?.pairAddress
+        ? `https://www.dextools.io/app/en/${DEXTOOLS_CHAIN_IDS[dexData.chainId ?? chainId] ?? (dexData.chainId ?? chainId)}/pair-explorer/${dexData.pairAddress}`
         : null),
-      screenerUrl: config.screenerUrl ?? (config.tokenAddress
-        ? `https://dexscreener.com/${dexData?.chainId ?? chainId}/${config.tokenAddress}`
-        : null),
+      screenerUrl: config.screenerUrl ?? (
+        (dexData?.chainId ?? chainId) === "bsc" && config.tokenAddress
+          ? `https://poocoin.app/tokens/${config.tokenAddress}`
+          : dexData?.pairAddress
+          ? `https://dexscreener.com/${dexData.chainId ?? chainId}/${dexData.pairAddress}`
+          : null
+      ),
       buyUrl: config.buyUrl ?? (config.tokenAddress && chainConfig
         ? JSON.stringify({ text: chainConfig.defaultBuyLabel.replace(/🛒\s*/u, ""), url: chainConfig.defaultBuyUrl.replace("{address}", config.tokenAddress) })
         : null),
