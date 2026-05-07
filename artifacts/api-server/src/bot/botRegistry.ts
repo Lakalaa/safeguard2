@@ -1408,28 +1408,15 @@ class BotRegistry {
             await tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy fallback failed"));
           }
         } else {
-          // Send text alert FIRST — custom emoji (tg-emoji) only renders in text messages,
-          // not in video/animation captions. This is how all major buy bots work.
-          const sent = await tgBot.sendMessage(config.chatId, message, {
-            parse_mode: "HTML",
-            disable_web_page_preview: true,
-            reply_markup: keyboard,
-          }).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed"); return null; });
-          if (isWaveStyle && sent?.message_id && waveFrames.length > 1) {
-            void (async () => {
-              const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
-              for (let i = 1; i < waveFrames.length; i++) {
-                await delay(400);
-                const frameMsg = buildAlertMessage(alertParams, waveFrames[i]);
-                await tgBot.editMessageText(frameMsg, { chat_id: config.chatId, message_id: sent.message_id, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard }).catch(() => {});
-              }
-            })();
-          }
-          // Then send the video/animation with no caption so it displays full-width
+          const mediaOpts = { caption: message, parse_mode: "HTML" as const, reply_markup: keyboard };
+          let mediaSent = false;
           if (mediaType === "animation") {
-            await tgBot.sendAnimation(config.chatId, mediaSrc).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy animation failed"));
+            mediaSent = await tgBot.sendAnimation(config.chatId, mediaSrc, mediaOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy animation failed"); return false; });
           } else {
-            await tgBot.sendVideo(config.chatId, mediaSrc).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy video failed"));
+            mediaSent = await tgBot.sendVideo(config.chatId, mediaSrc, mediaOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy video failed"); return false; });
+          }
+          if (!mediaSent) {
+            await tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy fallback failed"));
           }
         }
       } else {
