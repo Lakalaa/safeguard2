@@ -45,10 +45,10 @@ type PendingState =
   | { step: "await_co_bot_token" }
   | { step: "await_post_text" }
   | { step: "await_post_image"; text: string }
-  | { step: "await_post_buttons"; text: string; imageFileId?: string };
+  | { step: "await_post_buttons"; text: string; imageFileId?: string }
+  | { step: "await_sticker" };
 
 const pendingState = new Map<string, PendingState>();
-const pendingSticker = new Map<string, { fileId: string; displayEmoji: string }>();
 
 // ── Admin guard ────────────────────────────────────────────────────────────────
 async function isAdmin(bot: TelegramBot, chatId: string | number, userId: number): Promise<boolean> {
@@ -922,8 +922,10 @@ export function createCommandBot(token: string): TelegramBot {
     }
 
     if (!emoji) {
+      // Enter sticker-waiting mode — next sticker from this admin is saved immediately
+      pendingState.set(chatId, { step: "await_sticker" });
       await bot.sendMessage(chatId,
-        `🎨 <b>Set Alert Emoji</b>\n\nSend any animated sticker in the chat — I will automatically offer you a button to set it as your alert emoji.\n\n<i>Or reply to any sticker with /setmoji to set it directly.</i>`,
+        `🎨 <b>Set Alert Sticker</b>\n\nNow send any sticker — it will be sent with every buy alert.`,
         { parse_mode: "HTML" });
       return;
     }
@@ -997,7 +999,7 @@ export function createCommandBot(token: string): TelegramBot {
     const data = query.data ?? "";
 
     // ── setmoji_* can fire from private chat — handle before group admin check ──
-    if (data.startsWith("setmoji_custom:") || data.startsWith("setmoji_plain:") || data === "setmoji_cancel" || data === "setmoji_sticker_confirm" || data === "setmoji_sticker_cancel") {
+    if (data.startsWith("setmoji_custom:") || data.startsWith("setmoji_plain:") || data === "setmoji_cancel") {
       await bot.answerCallbackQuery(query.id);
       const isPrivate = query.message.chat.type === "private";
       // In private chat: look up most recent config for this user (by Telegram user ID stored as chat owner)
@@ -1009,29 +1011,8 @@ export function createCommandBot(token: string): TelegramBot {
         await bot.answerCallbackQuery(query.id, { text: "⚠️ No group linked. Set emoji from your group.", show_alert: true });
         return;
       }
-      if (data === "setmoji_cancel" || data === "setmoji_sticker_cancel") {
+      if (data === "setmoji_cancel") {
         await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: msgId }).catch(() => null);
-        pendingSticker.delete(chatId);
-        return;
-      }
-      if (data === "setmoji_sticker_confirm") {
-        const pending = pendingSticker.get(chatId);
-        pendingSticker.delete(chatId);
-        if (!pending) {
-          await bot.editMessageText("⚠️ Session expired. Send the sticker again.", { chat_id: chatId, message_id: msgId }).catch(() => null);
-          return;
-        }
-        if (targetConfig) {
-          await db.update(botConfigTable).set({
-            alertMediaFileId: pending.fileId,
-            alertMediaType: "sticker",
-            updatedAt: new Date(),
-          }).where(eq(botConfigTable.id, targetConfig.id));
-        }
-        await bot.editMessageText(
-          `✅ Sticker saved! It will be sent with every buy alert.`,
-          { chat_id: chatId, message_id: msgId },
-        ).catch(() => null);
         return;
       }
       if (data.startsWith("setmoji_custom:")) {
@@ -1629,7 +1610,7 @@ Send <code>clear</code> to remove the buy link.`,
     }
   });
 
-  // ── Sticker detector: admin sends sticker → ask to confirm (file_id stored in map) ──
+  // ── Sticker handler: saves sticker immediately when admin used /setmoji first ──
   bot.on("sticker", async (msg) => {
     if (!msg.from) return;
     const chatId = String(msg.chat.id);
@@ -1637,34 +1618,23 @@ Send <code>clear</code> to remove the buy link.`,
     // In groups: admin only. In private: always respond.
     if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
 
+    const state = pendingState.get(chatId);
+    if (state?.step !== "await_sticker") return; // Only act when /setmoji was just used
+
+    pendingState.delete(chatId);
+
     const sticker = msg.sticker as TelegramBot.Sticker & { custom_emoji_id?: string; type?: string };
     const fileId = sticker.file_id;
     if (!fileId) return;
 
-    // Build display text for the confirm message
-    let displayEmoji: string;
-    if (sticker.type === "custom_emoji" && sticker.custom_emoji_id) {
-      const base = sticker.emoji ?? "🔥";
-      displayEmoji = `<tg-emoji emoji-id="${sticker.custom_emoji_id}">${base}</tg-emoji>`;
-    } else {
-      displayEmoji = sticker.emoji ?? "🎭";
-    }
-
-    // Store pending sticker so the callback can retrieve the file_id (too long for callback_data)
-    pendingSticker.set(chatId, { fileId, displayEmoji });
+    const config = await getOrCreate(chatId, msg.chat.title);
+    await db.update(botConfigTable)
+      .set({ alertMediaFileId: fileId, alertMediaType: "sticker", updatedAt: new Date() })
+      .where(eq(botConfigTable.id, config.id));
 
     await bot.sendMessage(chatId,
-      `Set this sticker as your buy alert sticker? It will be sent with every buy alert.`,
-      {
-        parse_mode: "HTML",
-        reply_to_message_id: msg.message_id,
-        reply_markup: {
-          inline_keyboard: [[
-            { text: "✅ Yes", callback_data: "setmoji_sticker_confirm" },
-            { text: "❌ No", callback_data: "setmoji_sticker_cancel" },
-          ]],
-        },
-      },
+      `✅ Sticker saved! It will be sent with every buy alert.`,
+      { reply_to_message_id: msg.message_id },
     );
   });
 
