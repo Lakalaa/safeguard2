@@ -921,11 +921,9 @@ export function createCommandBot(token: string): TelegramBot {
     }
 
     if (!emoji) {
-      // No reply and no inline emoji — enter guided sticker flow
-      pendingState.set(chatId, { step: "await_emoji" });
       await bot.sendMessage(chatId,
-        `🎨 <b>Set Alert Emoji</b>\n\nSend me the animated sticker you want to use as the alert emoji.\n\nJust send it directly — I'll capture it automatically!`,
-        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+        `🎨 <b>Set Alert Emoji</b>\n\nSend any animated sticker in the chat — I will automatically offer you a button to set it as your alert emoji.\n\n<i>Or reply to any sticker with /setmoji to set it directly.</i>`,
+        { parse_mode: "HTML" });
       return;
     }
 
@@ -1552,7 +1550,41 @@ Send <code>clear</code> to remove the buy link.`,
 
     // Social links flow
     if (data === "cfg:social") {
-      pendingState.set(chatId, { step: "await_social_telegram" });
+    // ── setmoji confirm buttons (stateless — emoji encoded in callback data) ──
+    if (data.startsWith("setmoji_custom:")) {
+      // Format: setmoji_custom:{emojiId}:{baseChar}
+      const rest = data.slice("setmoji_custom:".length);
+      const colonIdx = rest.indexOf(":");
+      const emojiId = colonIdx !== -1 ? rest.slice(0, colonIdx) : rest;
+      const base = colonIdx !== -1 ? rest.slice(colonIdx + 1) : "🔥";
+      const emoji = `<tg-emoji emoji-id="${emojiId}">${base}</tg-emoji>`;
+      await db.update(botConfigTable)
+        .set({ alertEmoji: emoji, updatedAt: new Date() })
+        .where(eq(botConfigTable.id, config.id));
+      await bot.editMessageText(
+        `✅ Animated emoji saved!\n\nPreview: ${emoji.repeat(3)} → ${emoji.repeat(6)} → ${emoji.repeat(10)}`,
+        { chat_id: chatId, message_id: msgId, parse_mode: "HTML" },
+      ).catch(() => null);
+      return;
+    }
+    if (data.startsWith("setmoji_plain:")) {
+      const emoji = data.slice("setmoji_plain:".length);
+      if (!emoji) return;
+      await db.update(botConfigTable)
+        .set({ alertEmoji: emoji, updatedAt: new Date() })
+        .where(eq(botConfigTable.id, config.id));
+      await bot.editMessageText(
+        `✅ Emoji saved!\n\nPreview: ${emoji.repeat(3)} → ${emoji.repeat(6)} → ${emoji.repeat(10)}`,
+        { chat_id: chatId, message_id: msgId, parse_mode: "HTML" },
+      ).catch(() => null);
+      return;
+    }
+    if (data === "setmoji_cancel") {
+      await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: msgId }).catch(() => null);
+      return;
+    }
+
+          pendingState.set(chatId, { step: "await_social_telegram" });
       const current = config.telegramUrl || config.twitterUrl || config.websiteUrl;
       await bot.sendMessage(chatId,
         `👥 <b>Social Links</b>\n\nThese appear in the <b>Trending</b> alert style.\n\n` +
@@ -1564,7 +1596,54 @@ Send <code>clear</code> to remove the buy link.`,
     }
   });
 
-  // ── Message handler: replies + plain text (force_reply flow) ─────────────
+  // ── Sticker detector: admin sends sticker → offer inline confirm to set as alert emoji ──
+  bot.on("message", async (msg) => {
+    if (!(msg as any).sticker || !msg.from) return;
+    if (msg.chat.type === "private") return;
+    const chatId = String(msg.chat.id);
+    if (!(await isAdmin(bot, chatId, msg.from.id))) return;
+
+    const sticker = (msg as any).sticker as {
+      emoji?: string | null;
+      type?: string | null;
+      custom_emoji_id?: string | null;
+      set_name?: string | null;
+    };
+
+    let callbackData: string;
+    let previewEmoji: string;
+
+    if (sticker.type === "custom_emoji" && sticker.custom_emoji_id) {
+      const base = sticker.emoji ?? "🔥";
+      const emojiId = sticker.custom_emoji_id;
+      previewEmoji = `<tg-emoji emoji-id="${emojiId}">${base}</tg-emoji>`;
+      callbackData = `setmoji_custom:${emojiId}:${base}`;
+    } else if (sticker.emoji) {
+      previewEmoji = sticker.emoji;
+      callbackData = `setmoji_plain:${sticker.emoji}`;
+    } else {
+      return;
+    }
+
+    // Telegram callback_data max = 64 bytes
+    if (Buffer.byteLength(callbackData, "utf8") > 64) return;
+
+    await bot.sendMessage(chatId,
+      `${previewEmoji} Use this as your alert emoji?`,
+      {
+        parse_mode: "HTML",
+        reply_to_message_id: msg.message_id,
+        reply_markup: {
+          inline_keyboard: [[
+            { text: "✅ Yes, set it", callback_data: callbackData },
+            { text: "❌ No", callback_data: "setmoji_cancel" },
+          ]],
+        },
+      },
+    );
+  });
+
+    // ── Message handler: replies + plain text (force_reply flow) ─────────────
   bot.on("message", async (msg) => {
     if (!msg.from) return;
     const chatId = String(msg.chat.id);
