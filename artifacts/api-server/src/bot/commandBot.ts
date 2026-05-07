@@ -995,6 +995,51 @@ export function createCommandBot(token: string): TelegramBot {
     const msgId = query.message.message_id;
     const data = query.data ?? "";
 
+    // ── setmoji_* can fire from private chat — handle before group admin check ──
+    if (data.startsWith("setmoji_custom:") || data.startsWith("setmoji_plain:") || data === "setmoji_cancel") {
+      await bot.answerCallbackQuery(query.id);
+      const isPrivate = query.message.chat.type === "private";
+      // In private chat: look up most recent config for this user (by Telegram user ID stored as chat owner)
+      // In group: use the group's config directly
+      let targetConfig = isPrivate
+        ? (await db.select().from(botConfigTable).where(eq(botConfigTable.chatId, String(query.from.id))).limit(1))[0]
+        : (await db.select().from(botConfigTable).where(eq(botConfigTable.chatId, chatId)).limit(1))[0];
+      if (!targetConfig && isPrivate) {
+        await bot.answerCallbackQuery(query.id, { text: "⚠️ No group linked. Set emoji from your group.", show_alert: true });
+        return;
+      }
+      if (data === "setmoji_cancel") {
+        await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: msgId }).catch(() => null);
+        return;
+      }
+      if (data.startsWith("setmoji_custom:")) {
+        const rest = data.slice("setmoji_custom:".length);
+        const colonIdx = rest.indexOf(":");
+        const emojiId = colonIdx !== -1 ? rest.slice(0, colonIdx) : rest;
+        const base = colonIdx !== -1 ? rest.slice(colonIdx + 1) : "🔥";
+        const emoji = `<tg-emoji emoji-id="${emojiId}">${base}</tg-emoji>`;
+        if (targetConfig) {
+          await db.update(botConfigTable).set({ alertEmoji: emoji, updatedAt: new Date() }).where(eq(botConfigTable.id, targetConfig.id));
+        }
+        await bot.editMessageText(
+          `✅ Animated emoji saved!\n\nPreview: ${emoji.repeat(3)} → ${emoji.repeat(6)} → ${emoji.repeat(10)}`,
+          { chat_id: chatId, message_id: msgId, parse_mode: "HTML" },
+        ).catch(() => null);
+        return;
+      }
+      if (data.startsWith("setmoji_plain:")) {
+        const emoji = data.slice("setmoji_plain:".length);
+        if (emoji && targetConfig) {
+          await db.update(botConfigTable).set({ alertEmoji: emoji, updatedAt: new Date() }).where(eq(botConfigTable.id, targetConfig.id));
+        }
+        await bot.editMessageText(
+          `✅ Emoji saved!\n\nPreview: ${emoji.repeat(3)} → ${emoji.repeat(6)} → ${emoji.repeat(10)}`,
+          { chat_id: chatId, message_id: msgId, parse_mode: "HTML" },
+        ).catch(() => null);
+        return;
+      }
+    }
+
     if (!(await isAdmin(bot, chatId, query.from.id))) {
       await bot.answerCallbackQuery(query.id, { text: "⛔ Only group admins.", show_alert: true });
       return;
@@ -1550,40 +1595,6 @@ Send <code>clear</code> to remove the buy link.`,
 
     // Social links flow
     if (data === "cfg:social") {
-    // ── setmoji confirm buttons (stateless — emoji encoded in callback data) ──
-    if (data.startsWith("setmoji_custom:")) {
-      // Format: setmoji_custom:{emojiId}:{baseChar}
-      const rest = data.slice("setmoji_custom:".length);
-      const colonIdx = rest.indexOf(":");
-      const emojiId = colonIdx !== -1 ? rest.slice(0, colonIdx) : rest;
-      const base = colonIdx !== -1 ? rest.slice(colonIdx + 1) : "🔥";
-      const emoji = `<tg-emoji emoji-id="${emojiId}">${base}</tg-emoji>`;
-      await db.update(botConfigTable)
-        .set({ alertEmoji: emoji, updatedAt: new Date() })
-        .where(eq(botConfigTable.id, config.id));
-      await bot.editMessageText(
-        `✅ Animated emoji saved!\n\nPreview: ${emoji.repeat(3)} → ${emoji.repeat(6)} → ${emoji.repeat(10)}`,
-        { chat_id: chatId, message_id: msgId, parse_mode: "HTML" },
-      ).catch(() => null);
-      return;
-    }
-    if (data.startsWith("setmoji_plain:")) {
-      const emoji = data.slice("setmoji_plain:".length);
-      if (!emoji) return;
-      await db.update(botConfigTable)
-        .set({ alertEmoji: emoji, updatedAt: new Date() })
-        .where(eq(botConfigTable.id, config.id));
-      await bot.editMessageText(
-        `✅ Emoji saved!\n\nPreview: ${emoji.repeat(3)} → ${emoji.repeat(6)} → ${emoji.repeat(10)}`,
-        { chat_id: chatId, message_id: msgId, parse_mode: "HTML" },
-      ).catch(() => null);
-      return;
-    }
-    if (data === "setmoji_cancel") {
-      await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: msgId }).catch(() => null);
-      return;
-    }
-
           pendingState.set(chatId, { step: "await_social_telegram" });
       const current = config.telegramUrl || config.twitterUrl || config.websiteUrl;
       await bot.sendMessage(chatId,
@@ -1651,6 +1662,33 @@ Send <code>clear</code> to remove the buy link.`,
 
     // In groups, only process if admin
     if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+
+    // ── Custom emoji paste detection: admin sends inline animated emoji → offer confirm ──
+    {
+      const customEnt = msg.entities?.find((e: any) => e.type === "custom_emoji");
+      if (!pendingState.get(chatId) && customEnt && (customEnt as any).custom_emoji_id && msg.text) {
+        const emojiId = (customEnt as any).custom_emoji_id as string;
+        const baseChar = msg.text.slice(customEnt.offset, customEnt.offset + customEnt.length) || "🔥";
+        const emoji = `<tg-emoji emoji-id="${emojiId}">${baseChar}</tg-emoji>`;
+        const callbackData = `setmoji_custom:${emojiId}:${baseChar}`;
+        if (Buffer.byteLength(callbackData, "utf8") <= 64) {
+          await bot.sendMessage(chatId,
+            `${emoji} Use this as your alert emoji?`,
+            {
+              parse_mode: "HTML",
+              reply_to_message_id: msg.message_id,
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: "✅ Yes, set it", callback_data: callbackData },
+                  { text: "❌ No", callback_data: "setmoji_cancel" },
+                ]],
+              },
+            },
+          );
+        }
+        return;
+      }
+    }
 
     // ── Smart fallback: if state was lost (server restart) but message looks
     //    like a token address, use the stored chain from DB and process it ──
