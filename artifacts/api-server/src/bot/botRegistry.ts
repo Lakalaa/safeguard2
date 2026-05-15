@@ -371,11 +371,11 @@ function buildSosanaMessage(params: AlertParams): string {
   if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   const _buyLink = parseBuyLink(params.buyUrl);
   if (_buyLink) linkParts.push(`<a href="${_buyLink.url}">${_buyLink.text}</a>`);
-  if (params.trendingRank !== null) {
-    const trendLabel = `🔥 Trending #${params.trendingRank}`;
-    linkParts.push((params.trendingUrl || params.screenerUrl)
-      ? `<a href="${params.trendingUrl ?? params.screenerUrl}">${trendLabel}</a>`
-      : trendLabel);
+  {
+    const trendUrl = params.trendingUrl ?? params.screenerUrl;
+    const trendLabel = params.trendingRank !== null ? `🔥 Trending #${params.trendingRank}` : `🔥 Trending`;
+    if (trendUrl) linkParts.push(`<a href="${trendUrl}">${trendLabel}</a>`);
+    else linkParts.push(trendLabel);
   }
   const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
@@ -420,11 +420,11 @@ function buildWaveMessage(params: AlertParams, emojiBarStr?: string): string {
   if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   const _wBuyLink = parseBuyLink(params.buyUrl);
   if (_wBuyLink) linkParts.push(`<a href="${_wBuyLink.url}">${_wBuyLink.text}</a>`);
-  if (params.trendingRank !== null) {
-    const trendLabel = `🔥 Trending #${params.trendingRank}`;
-    linkParts.push((params.trendingUrl || params.screenerUrl)
-      ? `<a href="${params.trendingUrl ?? params.screenerUrl}">${trendLabel}</a>`
-      : trendLabel);
+  {
+    const trendUrl = params.trendingUrl ?? params.screenerUrl;
+    const trendLabel = params.trendingRank !== null ? `🔥 Trending #${params.trendingRank}` : `🔥 Trending`;
+    if (trendUrl) linkParts.push(`<a href="${trendUrl}">${trendLabel}</a>`);
+    else linkParts.push(trendLabel);
   }
   const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
@@ -474,11 +474,11 @@ function buildEvmMessage(params: AlertParams): string {
   if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   const _eBuyLink = parseBuyLink(params.buyUrl);
   if (_eBuyLink) linkParts.push(`<a href="${_eBuyLink.url}">${_eBuyLink.text}</a>`);
-  if (params.trendingRank !== null) {
-    const trendLabel = `🔥 Trending #${params.trendingRank}`;
-    linkParts.push((params.trendingUrl || params.screenerUrl)
-      ? `<a href="${params.trendingUrl ?? params.screenerUrl}">${trendLabel}</a>`
-      : trendLabel);
+  {
+    const trendUrl = params.trendingUrl ?? params.screenerUrl;
+    const trendLabel = params.trendingRank !== null ? `🔥 Trending #${params.trendingRank}` : `🔥 Trending`;
+    if (trendUrl) linkParts.push(`<a href="${trendUrl}">${trendLabel}</a>`);
+    else linkParts.push(trendLabel);
   }
   const linksFooter = linkParts.length > 0 ? `\n\n${linkParts.join(" | ")}` : "";
 
@@ -530,11 +530,11 @@ function buildTrendingMessage(params: AlertParams): string {
   if (params.screenerUrl) trendLinkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
   const _buyLinkMsg = parseBuyLink(params.buyUrl);
   if (_buyLinkMsg) trendLinkParts.push(`<a href="${_buyLinkMsg.url}">${_buyLinkMsg.text}</a>`);
-  if (params.trendingRank !== null) {
-    const trendLabel = `🔥 Trending #${params.trendingRank}`;
-    trendLinkParts.push((params.trendingUrl || params.screenerUrl)
-      ? `<a href="${params.trendingUrl ?? params.screenerUrl}">${trendLabel}</a>`
-      : trendLabel);
+  {
+    const trendUrl = params.trendingUrl ?? params.screenerUrl;
+    const trendLabel = params.trendingRank !== null ? `🔥 Trending #${params.trendingRank}` : `🔥 Trending`;
+    if (trendUrl) trendLinkParts.push(`<a href="${trendUrl}">${trendLabel}</a>`);
+    else trendLinkParts.push(trendLabel);
   }
   const trendLinksFooter = trendLinkParts.length > 0 ? `\n\n${trendLinkParts.join(" | ")}` : "";
 
