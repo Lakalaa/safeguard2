@@ -460,7 +460,7 @@ function buildSosanaEntities(params: AlertParams): { text: string; entities: TgE
 
 // Returns entities payload if alertEmoji has a custom emoji ID, else null (fall back to HTML)
 function buildAlertEntities(params: AlertParams): { text: string; entities: TgEntity[] } | null {
-  if (!params.alertEmoji?.includes("emoji-id=")) return null;
+  // wave/evm/trending keep HTML; sosana always uses entities (animated emoji via custom_emoji entity)
   if (params.alertStyle === "wave" || params.alertStyle === "evm" || params.alertStyle === "trending") return null;
   return buildSosanaEntities(params);
 }
