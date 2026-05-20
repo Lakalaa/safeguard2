@@ -397,6 +397,74 @@ function buildSosanaKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMar
   return { inline_keyboard: rows };
 }
 
+// ── Entities builder — animated custom emoji without Premium ───────────────────
+// Uses Telegram message entities instead of parse_mode HTML.
+// Supports custom_emoji, bold, and text_link in one message.
+type TgEntity = { type: string; offset: number; length: number; url?: string; custom_emoji_id?: string };
+
+function buildSosanaEntities(params: AlertParams): { text: string; entities: TgEntity[] } {
+  const ents: TgEntity[] = [];
+  let pos = 0, txt = "";
+  const raw = (s: string) => { txt += s; pos += s.length; };
+  const ent = (s: string, type: string, extra: Partial<TgEntity> = {}) => {
+    const o = pos; raw(s); ents.push({ type, offset: o, length: s.length, ...extra } as TgEntity);
+  };
+  const bold = (s: string) => ent(s, "bold");
+  const link = (s: string, url: string) => ent(s, "text_link", { url });
+
+  // Title
+  ent(`${params.tokenName} Buy!`, "bold"); raw("\n");
+
+  // Emoji bar — custom_emoji entity if ID present, else plain
+  const emojiStr = params.alertEmoji || "🟢";
+  const emojiIdMatch = emojiStr.match(/emoji-id="(\d+)"/);
+  const emojiId = emojiIdMatch?.[1] ?? null;
+  const emojiChar = emojiIdMatch ? (emojiStr.match(/>([\s\S]+?)<\/tg-emoji>/)?.[1] ?? "🐕") : emojiStr;
+  const emojiCount = Math.max(1, Math.min(20, Math.round(
+    (params.emojiPerTier ?? 5) * Math.sqrt(params.amountUsd / Math.max(1, params.minBuyUsd ?? 1))
+  )));
+  for (let i = 0; i < emojiCount; i++) {
+    if (emojiId) ent(emojiChar, "custom_emoji", { custom_emoji_id: emojiId });
+    else raw(emojiChar);
+  }
+  raw("\n\n");
+
+  // Amounts
+  raw("🔀 Spent "); bold(formatNumber(params.amountUsd));
+  if (params.amountNative > 0) raw(` (${params.amountNative.toFixed(3)} ${params.nativeCurrency})`);
+  raw("\n🔀 Got "); bold(`${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}`);
+  raw("\n👤 ");
+  link("Buyer", params.explorerAddress.replace("{address}", params.buyerAddress));
+  raw(" / ");
+  link("TX", params.explorerTx.replace("{tx}", params.txSignature));
+  if (params.priceChangePct !== null) { raw("\n🪙 Position "); bold(`${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(0)}%`); }
+  if (params.marketCap !== null) { raw("\n💰 Market Cap "); bold(Math.round(params.marketCap).toLocaleString("en-US")); }
+  raw("\n\n");
+
+  // Footer links
+  const footerParts: Array<{ text: string; url?: string }> = [];
+  if (params.dextUrl) footerParts.push({ text: "DexTools", url: params.dextUrl });
+  if (params.screenerUrl) footerParts.push({ text: "Screener", url: params.screenerUrl });
+  const buyLinkParsed = parseBuyLink(params.buyUrl);
+  if (buyLinkParsed) footerParts.push({ text: buyLinkParsed.text, url: buyLinkParsed.url });
+  const trendUrl = (params.trendingUrl ?? params.screenerUrl) ?? undefined;
+  const trendLabel = params.trendingRank !== null ? `🔥 Trending #${params.trendingRank}` : "🔥 Trending";
+  footerParts.push(trendUrl ? { text: trendLabel, url: trendUrl } : { text: trendLabel });
+  footerParts.forEach((part, i) => {
+    if (i > 0) raw(" | ");
+    if (part.url) link(part.text, part.url); else raw(part.text);
+  });
+
+  return { text: txt, entities: ents };
+}
+
+// Returns entities payload if alertEmoji has a custom emoji ID, else null (fall back to HTML)
+function buildAlertEntities(params: AlertParams): { text: string; entities: TgEntity[] } | null {
+  if (!params.alertEmoji?.includes("emoji-id=")) return null;
+  if (params.alertStyle === "wave" || params.alertStyle === "evm" || params.alertStyle === "trending") return null;
+  return buildSosanaEntities(params);
+}
+
 // ── Style 3: Wave (animated) ────────────────────────────────────────────────────
 // Same layout as SOSANA but emoji bar animates after sending.
 // buildWaveMessage accepts an optional emojiBarStr to override for animation frames.
@@ -1379,15 +1447,15 @@ class BotRegistry {
     const alertTokens = [token, ...(config.coBotToken ? [config.coBotToken] : [])];
     for (const tk of alertTokens) {
       const tgBot = new TelegramBot(tk, { polling: false });
+      const entData = buildAlertEntities(alertParams);
       if (mediaType === "sticker" && mediaFileId) {
         // Send sticker as a separate message first (sendSticker doesn't support captions)
         await tgBot.sendSticker(config.chatId, mediaFileId).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy sticker failed"));
         // Then send the alert text
-        const sent = await tgBot.sendMessage(config.chatId, message, {
-          parse_mode: "HTML",
-          disable_web_page_preview: true,
-          reply_markup: keyboard,
-        }).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed"); return null; });
+        const sent = await (entData
+          ? tgBot.sendMessage(config.chatId, entData.text, { entities: entData.entities as any, disable_web_page_preview: true, reply_markup: keyboard })
+          : tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard })
+        ).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed"); return null; });
         if (isWaveStyle && sent?.message_id && waveFrames.length > 1) {
           void (async () => {
             const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
@@ -1409,23 +1477,29 @@ class BotRegistry {
           }
         } else {
           // ONE combined message: video/animation with alert text as caption
-          const mediaOpts = { caption: message, parse_mode: "HTML" as const, reply_markup: keyboard };
+          // Use caption_entities for animated custom emoji (no parse_mode needed)
+          const mediaOpts = entData
+            ? { caption: entData.text, caption_entities: entData.entities as any, reply_markup: keyboard }
+            : { caption: message, parse_mode: "HTML" as const, reply_markup: keyboard };
           let mediaSent = false;
           if (mediaType === "animation") {
-            mediaSent = await tgBot.sendAnimation(config.chatId, mediaSrc, mediaOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy animation failed"); return false; });
+            mediaSent = await tgBot.sendAnimation(config.chatId, mediaSrc, mediaOpts as any).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy animation failed"); return false; });
           } else {
-            mediaSent = await tgBot.sendVideo(config.chatId, mediaSrc, mediaOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy video failed"); return false; });
+            mediaSent = await tgBot.sendVideo(config.chatId, mediaSrc, mediaOpts as any).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy video failed"); return false; });
           }
           if (!mediaSent) {
-            await tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy fallback failed"));
+            const fallbackOpts = entData
+              ? { entities: entData.entities as any, disable_web_page_preview: true, reply_markup: keyboard }
+              : { parse_mode: "HTML" as const, disable_web_page_preview: true, reply_markup: keyboard };
+            const fallbackText = entData ? entData.text : message;
+            await tgBot.sendMessage(config.chatId, fallbackText, fallbackOpts as any).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy fallback failed"));
           }
         }
       } else {
-        const sent = await tgBot.sendMessage(config.chatId, message, {
-          parse_mode: "HTML",
-          disable_web_page_preview: true,
-          reply_markup: keyboard,
-        }).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed"); return null; });
+        const sent = await (entData
+          ? tgBot.sendMessage(config.chatId, entData.text, { entities: entData.entities as any, disable_web_page_preview: true, reply_markup: keyboard })
+          : tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard })
+        ).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed"); return null; });
 
         // Fire wave animation in background (non-blocking)
         if (isWaveStyle && sent?.message_id && waveFrames.length > 1) {
