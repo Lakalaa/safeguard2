@@ -5,6 +5,7 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { botRegistry } from "./bot/botRegistry";
 import { startCommandBot } from "./bot/commandBot";
+import { pool } from "@workspace/db";
 
 const app: Express = express();
 
@@ -32,6 +33,19 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", router);
+
+// Auto-migrate: ensure custom_commands table exists (safe to run every startup)
+pool.query(`
+  CREATE TABLE IF NOT EXISTS custom_commands (
+    id SERIAL PRIMARY KEY,
+    bot_config_id INTEGER REFERENCES bot_config(id) ON DELETE CASCADE,
+    command_name TEXT NOT NULL,
+    message_text TEXT NOT NULL,
+    buttons_json TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )
+`).then(() => logger.info("custom_commands table ready"))
+  .catch((err: unknown) => logger.error({ err }, "custom_commands migration failed"));
 
 botRegistry.autoStartAll().catch((err) => {
   logger.error({ err }, "Failed to auto-start bots");
