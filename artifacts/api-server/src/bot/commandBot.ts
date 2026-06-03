@@ -1115,17 +1115,24 @@ export function createCommandBot(token: string): TelegramBot {
     // filter_add_btn — admin wants to add buttons to a custom command
     if (data.startsWith("filter_add_btn:")) {
       const commandName = data.slice("filter_add_btn:".length);
-      const [cmd] = await db.select().from(customCommandsTable)
-        .where(and(eq(customCommandsTable.botConfigId, config.id), eq(customCommandsTable.commandName, commandName)))
-        .limit(1);
+      let cmd: typeof customCommandsTable.$inferSelect | undefined;
+      try {
+        [cmd] = await db.select().from(customCommandsTable)
+          .where(and(eq(customCommandsTable.botConfigId, config.id), eq(customCommandsTable.commandName, commandName)))
+          .limit(1);
+      } catch (e) {
+        logger.error({ err: String(e), commandName, chatId }, "filter_add_btn DB error");
+        await bot.sendMessage(chatId, `⚠️ Database error — try running <code>/filter ${commandName} &lt;message&gt;</code> again.`, { parse_mode: "HTML" });
+        return;
+      }
       if (!cmd) {
-        await bot.sendMessage(chatId, `❌ Command not found.`);
+        await bot.sendMessage(chatId, `❌ Command <code>/${commandName}</code> not found. Run <code>/filter ${commandName} &lt;message&gt;</code> first.`, { parse_mode: "HTML" });
         return;
       }
       pendingState.set(chatId, { step: "await_filter_buttons", commandName, messageText: cmd.messageText });
       await bot.sendMessage(chatId,
-        `➕ Adding buttons to <code>/${commandName}</code>\n\nSend one button per line:\n<code>Button Label | https://url</code>\n\nExample:\n<code>🌐 Website | https://horny.xyz</code>\n<code>🛒 Buy | https://jup.ag</code>\n<code>📊 Chart | https://dexscreener.com/...</code>\n\nAdd as many buttons as you want, shown 2 per row.`,
-        { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true } });
+        `➕ <b>Adding a button to <code>/${commandName}</code></b>\n\nReply with one line per button:\n<code>Button Label | https://url</code>\n\nExamples:\n<code>🛒 Buy Now | https://jup.ag</code>\n<code>📊 Chart | https://dexscreener.com/solana/...</code>\n<code>🌐 Website | https://yoursite.com</code>\n\nMultiple buttons on the same row: use <b>||</b> between them.\nSend as many lines as you want.`,
+        { parse_mode: "HTML" });
       return;
     }
 
