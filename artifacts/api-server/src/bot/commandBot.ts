@@ -513,7 +513,32 @@ export function createCommandBot(token: string): TelegramBot {
       bot.startPolling({ restart: false }).catch(() => null);
     });
 
-  // Register commands so they appear in "/" menu
+  // ── Refresh per-chat command list (static + custom commands for that chat) ──
+  async function refreshChatCommands(chatId: string, configId: number): Promise<void> {
+    try {
+      const custom = await db.select().from(customCommandsTable)
+        .where(eq(customCommandsTable.botConfigId, configId))
+        .orderBy(customCommandsTable.commandName);
+      const staticCmds = [
+        { command: "add", description: "Add / change monitored token" },
+        { command: "token", description: "Set token address directly" },
+        { command: "setup", description: "Open buy-alert settings panel" },
+        { command: "start", description: "Start buy alert monitoring" },
+        { command: "stop", description: "Stop monitoring" },
+        { command: "status", description: "Check current status" },
+        { command: "raid", description: "Open Raid Tracker setup" },
+        { command: "vote", description: "Open Vote Alert setup" },
+        { command: "filter", description: "Admin: create/manage custom commands" },
+        { command: "post", description: "Post a message with buttons to the group" },
+      ];
+      const customCmds = custom.map(c => ({ command: c.commandName, description: c.messageText.slice(0, 256) }));
+      await bot.setMyCommands([...staticCmds, ...customCmds], {
+        scope: { type: "chat", chat_id: chatId } as any,
+      });
+    } catch { /* best-effort */ }
+  }
+
+  // Register global commands so they appear in "/" menu (fallback for new chats)
   bot.setMyCommands([
     { command: "add", description: "Add / change monitored token" },
     { command: "token", description: "Set token address directly" },
@@ -630,6 +655,7 @@ export function createCommandBot(token: string): TelegramBot {
       await db.delete(customCommandsTable)
         .where(and(eq(customCommandsTable.botConfigId, config.id), eq(customCommandsTable.commandName, name)));
       await bot.sendMessage(chatId, `🗑 Command <code>/${name}</code> deleted.`, { parse_mode: "HTML" });
+      void refreshChatCommands(chatId, config.id);
       return;
     }
 
@@ -663,6 +689,7 @@ export function createCommandBot(token: string): TelegramBot {
     await db.delete(customCommandsTable)
       .where(and(eq(customCommandsTable.botConfigId, config.id), eq(customCommandsTable.commandName, commandName)));
     await db.insert(customCommandsTable).values({ botConfigId: config.id, commandName, messageText, buttonsJson: null });
+    void refreshChatCommands(chatId, config.id);
 
     await bot.sendMessage(chatId,
       `✅ <b>/<code>${commandName}</code></b> saved!\n\nUsers can now type <code>/${commandName}</code> or <code>${commandName}</code>\n\nWant to add buttons under the message?`,
@@ -2321,11 +2348,17 @@ Send <code>clear</code> to remove the buy link.`,
     const config = await getOrCreate(chatId).catch(() => null);
     if (!config) return;
 
-    const [cmd] = await db.select().from(customCommandsTable)
-      .where(and(
-        eq(customCommandsTable.botConfigId, config.id),
-        eq(customCommandsTable.commandName, commandName),
-      )).limit(1);
+    let cmd: typeof customCommandsTable.$inferSelect | undefined;
+    try {
+      [cmd] = await db.select().from(customCommandsTable)
+        .where(and(
+          eq(customCommandsTable.botConfigId, config.id),
+          eq(customCommandsTable.commandName, commandName),
+        )).limit(1);
+    } catch (e) {
+      logger.warn({ err: String(e), commandName, chatId }, "custom command lookup failed");
+      return;
+    }
 
     if (!cmd) return;
 
