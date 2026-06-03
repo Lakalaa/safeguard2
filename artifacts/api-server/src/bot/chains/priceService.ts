@@ -44,10 +44,29 @@ export async function getTrendingInfo(
   const lower = tokenAddress.toLowerCase();
   const chain = chainId.toLowerCase();
 
-  // Filter to this chain only — rank is chain-specific (matches @trendingssol and similar)
-  const chainEntries = trendingCache.entries.filter((e) => e.chainId?.toLowerCase() === chain);
+  // Deduplicate raw entries by (chainId + tokenAddress) — DexScreener returns one row per boost
+  // transaction, so the same token appears multiple times. We merge them (sum amounts, keep best
+  // url) and re-sort by totalAmount descending to match DexScreener's visible leaderboard order.
+  const dedup = (entries: BoostEntry[]): BoostEntry[] => {
+    const map = new Map<string, BoostEntry>();
+    for (const e of entries) {
+      const key = `${e.chainId?.toLowerCase()}:${e.tokenAddress?.toLowerCase()}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.totalAmount = (existing.totalAmount ?? 0) + (e.totalAmount ?? 0);
+        existing.amount = (existing.amount ?? 0) + (e.amount ?? 0);
+        if (!existing.url && e.url) existing.url = e.url;
+      } else {
+        map.set(key, { ...e });
+      }
+    }
+    return [...map.values()].sort((a, b) => (b.totalAmount ?? 0) - (a.totalAmount ?? 0));
+  };
 
-  // Find token within chain entries
+  // Filter to this chain only — rank is chain-specific (matches @trendingssol and similar)
+  const chainEntries = dedup(trendingCache.entries.filter((e) => e.chainId?.toLowerCase() === chain));
+
+  // Find token within deduplicated chain entries
   let chainIdx = chainEntries.findIndex((e) => e.tokenAddress?.toLowerCase() === lower);
 
   // Fallback: search across all chains if not found on expected chain
@@ -57,12 +76,12 @@ export async function getTrendingInfo(
     entry = chainEntries[chainIdx]!;
     rank = chainIdx + 1;
   } else {
-    const globalIdx = trendingCache.entries.findIndex((e) => e.tokenAddress?.toLowerCase() === lower);
+    const allEntries = dedup(trendingCache.entries);
+    const globalIdx = allEntries.findIndex((e) => e.tokenAddress?.toLowerCase() === lower);
     if (globalIdx !== -1) {
-      entry = trendingCache.entries[globalIdx]!;
-      // Compute rank within that token's actual chain
+      entry = allEntries[globalIdx]!;
       const actualChain = entry.chainId?.toLowerCase() ?? chain;
-      const actualChainEntries = trendingCache.entries.filter((e) => e.chainId?.toLowerCase() === actualChain);
+      const actualChainEntries = dedup(trendingCache.entries.filter((e) => e.chainId?.toLowerCase() === actualChain));
       rank = actualChainEntries.findIndex((e) => e.tokenAddress?.toLowerCase() === lower) + 1;
     }
   }
