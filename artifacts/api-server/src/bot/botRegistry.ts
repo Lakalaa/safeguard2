@@ -1,4 +1,5 @@
 import TelegramBot from "node-telegram-bot-api";
+import https from "node:https";
 import { db } from "@workspace/db";
 import { botConfigTable, alertsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
@@ -456,6 +457,21 @@ function buildSosanaEntities(params: AlertParams): { text: string; entities: TgE
   });
 
   return { text: txt, entities: ents };
+}
+
+// Raw JSON call to Telegram API — bypasses node-telegram-bot-api's multipart serialization
+// which breaks caption_entities / entities arrays. Always use this for entity-based sends.
+function tgApiJson(token: string, method: string, params: Record<string, unknown>): Promise<{ ok: boolean; result?: { message_id?: number }; description?: string }> {
+  return new Promise((resolve) => {
+    const body = Buffer.from(JSON.stringify(params));
+    const req = https.request(
+      { hostname: "api.telegram.org", path: `/bot${token}/${method}`, method: "POST",
+        headers: { "Content-Type": "application/json", "Content-Length": body.length } },
+      r => { let d = ""; r.on("data", c => d += c); r.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve({ ok: false }); } }); }
+    );
+    req.on("error", () => resolve({ ok: false }));
+    req.write(body); req.end();
+  });
 }
 
 // Returns entities payload if alertEmoji has a custom emoji ID, else null (fall back to HTML)
@@ -1451,11 +1467,12 @@ class BotRegistry {
       if (mediaType === "sticker" && mediaFileId) {
         // Send sticker as a separate message first (sendSticker doesn't support captions)
         await tgBot.sendSticker(config.chatId, mediaFileId).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy sticker failed"));
-        // Then send the alert text
-        const sent = await (entData
-          ? tgBot.sendMessage(config.chatId, entData.text, { entities: entData.entities as any, disable_web_page_preview: true, reply_markup: keyboard })
-          : tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard })
-        ).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed"); return null; });
+        // Then send the alert text — use raw JSON for entities (library multipart breaks arrays)
+        const sentRaw = entData
+          ? await tgApiJson(tk, "sendMessage", { chat_id: config.chatId, text: entData.text, entities: entData.entities, disable_web_page_preview: true, reply_markup: keyboard })
+          : await tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard }).then(m => ({ ok: true, result: m })).catch(() => ({ ok: false }));
+        if (!sentRaw.ok) logger.warn({ configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed");
+        const sent = sentRaw.result as { message_id?: number } | undefined;
         if (isWaveStyle && sent?.message_id && waveFrames.length > 1) {
           void (async () => {
             const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
@@ -1476,30 +1493,39 @@ class BotRegistry {
             await tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard }).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy fallback failed"));
           }
         } else {
-          // ONE combined message: video/animation with alert text as caption
-          // Use caption_entities for animated custom emoji (no parse_mode needed)
-          const mediaOpts = entData
-            ? { caption: entData.text, caption_entities: entData.entities as any, reply_markup: keyboard }
-            : { caption: message, parse_mode: "HTML" as const, reply_markup: keyboard };
+          // ONE combined message: video/animation with caption
+          // Raw JSON for entity-based sends — library multipart serialization breaks caption_entities arrays
           let mediaSent = false;
-          if (mediaType === "animation") {
-            mediaSent = await tgBot.sendAnimation(config.chatId, mediaSrc, mediaOpts as any).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy animation failed"); return false; });
+          if (entData) {
+            const tgMethod = mediaType === "animation" ? "sendAnimation" : "sendVideo";
+            const mediaKey = mediaType === "animation" ? "animation" : "video";
+            const res = await tgApiJson(tk, tgMethod, { chat_id: config.chatId, [mediaKey]: mediaSrc, caption: entData.text, caption_entities: entData.entities, reply_markup: keyboard });
+            mediaSent = res.ok;
+            if (!res.ok) logger.warn({ err: res.description, configId, tk: tk.slice(0, 10) }, `Co-bot buy ${tgMethod} failed`);
           } else {
-            mediaSent = await tgBot.sendVideo(config.chatId, mediaSrc, mediaOpts as any).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy video failed"); return false; });
+            const mediaOpts = { caption: message, parse_mode: "HTML" as const, reply_markup: keyboard };
+            if (mediaType === "animation") {
+              mediaSent = await tgBot.sendAnimation(config.chatId, mediaSrc, mediaOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy animation failed"); return false; });
+            } else {
+              mediaSent = await tgBot.sendVideo(config.chatId, mediaSrc, mediaOpts).then(() => true).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy video failed"); return false; });
+            }
           }
           if (!mediaSent) {
-            const fallbackOpts = entData
-              ? { entities: entData.entities as any, disable_web_page_preview: true, reply_markup: keyboard }
-              : { parse_mode: "HTML" as const, disable_web_page_preview: true, reply_markup: keyboard };
-            const fallbackText = entData ? entData.text : message;
-            await tgBot.sendMessage(config.chatId, fallbackText, fallbackOpts as any).catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy fallback failed"));
+            if (entData) {
+              await tgApiJson(tk, "sendMessage", { chat_id: config.chatId, text: entData.text, entities: entData.entities, disable_web_page_preview: true, reply_markup: keyboard })
+                .catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy fallback failed"));
+            } else {
+              await tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard })
+                .catch((e) => logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy fallback failed"));
+            }
           }
         }
       } else {
-        const sent = await (entData
-          ? tgBot.sendMessage(config.chatId, entData.text, { entities: entData.entities as any, disable_web_page_preview: true, reply_markup: keyboard })
-          : tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard })
-        ).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed"); return null; });
+        const sentRes = entData
+          ? await tgApiJson(tk, "sendMessage", { chat_id: config.chatId, text: entData.text, entities: entData.entities, disable_web_page_preview: true, reply_markup: keyboard })
+          : await tgBot.sendMessage(config.chatId, message, { parse_mode: "HTML", disable_web_page_preview: true, reply_markup: keyboard }).then(m => ({ ok: true, result: m })).catch((e) => { logger.warn({ err: String(e), configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed"); return { ok: false }; });
+        if (!sentRes.ok) logger.warn({ configId, tk: tk.slice(0, 10) }, "Co-bot buy message failed");
+        const sent = sentRes.result as { message_id?: number } | undefined;
 
         // Fire wave animation in background (non-blocking)
         if (isWaveStyle && sent?.message_id && waveFrames.length > 1) {
