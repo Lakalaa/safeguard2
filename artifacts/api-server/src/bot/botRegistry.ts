@@ -671,9 +671,9 @@ function buildTrendingKeyboard(params: AlertParams): TelegramBot.InlineKeyboardM
 // ── Presale style ─────────────────────────────────────────────────────────────
 function buildPresaleMessage(params: AlertParams): string {
   const tagline = params.presaleTagline || "A smart move just happened.";
-  const quote = params.presaleQuote || '"Don't watch from the sidelines 👀"';
+  const quote = params.presaleQuote ?? "\u201cDon\u2019t watch from the sidelines \ud83d\udc40\u201d";
   const totalRaised = params.totalRaised != null
-    ? `${Math.round(params.totalRaised).toLocaleString("en-US")}`
+    ? "$" + Math.round(params.totalRaised).toLocaleString("en-US")
     : "—";
   const totalAlphas = params.totalAlphas != null
     ? params.totalAlphas.toLocaleString("en-US")
