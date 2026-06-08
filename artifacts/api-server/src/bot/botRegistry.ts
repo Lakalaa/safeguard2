@@ -678,6 +678,12 @@ function buildPresaleMessage(params: AlertParams): string {
   const totalAlphas = params.totalAlphas != null
     ? params.totalAlphas.toLocaleString("en-US")
     : "—";
+  const positionLine = params.priceChangePct !== null
+    ? `\n📊 <b>Position:</b> ${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(0)}%`
+    : "";
+  const mcapLine = params.marketCap !== null
+    ? `\n💎 <b>Mkt Cap:</b> $${Math.round(params.marketCap).toLocaleString("en-US")}`
+    : "";
   const _buyLink = parseBuyLink(params.buyUrl);
   const buyLine = _buyLink
     ? `\n\n🛒 <a href="${_buyLink.url}">Buy ${params.tokenSymbol}</a>`
@@ -687,8 +693,10 @@ function buildPresaleMessage(params: AlertParams): string {
     `🟢 <b>New Buy</b> 🟢\n\n` +
     `${tagline}\n\n` +
     `🪙 <b>Token:</b> ${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}\n` +
-    `💸 <b>Amount:</b> ${Math.round(params.amountUsd).toLocaleString("en-US")}\n` +
-    `💰 <b>Total Raised:</b> ${totalRaised}\n` +
+    `💸 <b>Amount:</b> $${Math.round(params.amountUsd).toLocaleString("en-US")}` +
+    positionLine +
+    mcapLine +
+    `\n💰 <b>Total Raised:</b> ${totalRaised}\n` +
     `👥 <b>Total Alphas:</b> ${totalAlphas}\n\n` +
     `${quote}` +
     buyLine
