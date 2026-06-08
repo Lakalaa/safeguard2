@@ -373,9 +373,13 @@ function buildSosanaMessage(params: AlertParams): string {
     ? ` (${params.amountNative.toFixed(3)} ${params.nativeCurrency})`
     : "";
 
-  const positionLine = `\n🪙 Position <b>${params.priceChangePct !== null ? `${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(0)}%` : "—"}</b>`;
+  const positionLine = params.priceChangePct !== null
+    ? `\n🪙 Position <b>${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(0)}%</b>`
+    : "";
 
-  const mcapLine = `\n💰 Market Cap <b>${params.marketCap !== null ? Math.round(params.marketCap).toLocaleString("en-US") : "—"}</b>`;
+  const mcapLine = params.marketCap !== null
+    ? `\n💰 Market Cap <b>${Math.round(params.marketCap).toLocaleString("en-US")}</b>`
+    : "";
 
   const linkParts: string[] = [];
   if (params.dextUrl) linkParts.push(`<a href="${params.dextUrl}">DexTools</a>`);
@@ -448,8 +452,8 @@ function buildSosanaEntities(params: AlertParams): { text: string; entities: TgE
   link("Buyer", params.explorerAddress.replace("{address}", params.buyerAddress));
   raw(" / ");
   link("TX", params.explorerTx.replace("{tx}", params.txSignature));
-  raw("\n🪙 Position "); bold(params.priceChangePct !== null ? `${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(0)}%` : "—");
-  raw("\n💰 Market Cap "); bold(params.marketCap !== null ? Math.round(params.marketCap).toLocaleString("en-US") : "—");
+  if (params.priceChangePct !== null) { raw("\n🪙 Position "); bold(`${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(0)}%`); }
+  if (params.marketCap !== null) { raw("\n💰 Market Cap "); bold(Math.round(params.marketCap).toLocaleString("en-US")); }
   raw("\n\n");
 
   // Footer links
@@ -503,8 +507,12 @@ function buildWaveMessage(params: AlertParams, emojiBarStr?: string): string {
   const nativeStr = params.amountNative > 0
     ? ` (${params.amountNative.toFixed(3)} ${params.nativeCurrency})`
     : "";
-  const positionLine = `\n🪙 Position <b>${params.priceChangePct !== null ? `${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(0)}%` : "—"}</b>`;
-  const mcapLine = `\n💰 Market Cap <b>${params.marketCap !== null ? Math.round(params.marketCap).toLocaleString("en-US") : "—"}</b>`;
+  const positionLine = params.priceChangePct !== null
+    ? `\n🪙 Position <b>${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(0)}%</b>`
+    : "";
+  const mcapLine = params.marketCap !== null
+    ? `\n💰 Market Cap <b>${Math.round(params.marketCap).toLocaleString("en-US")}</b>`
+    : "";
   const linkParts: string[] = [];
   if (params.dextUrl) linkParts.push(`<a href="${params.dextUrl}">DexTools</a>`);
   if (params.screenerUrl) linkParts.push(`<a href="${params.screenerUrl}">Screener</a>`);
