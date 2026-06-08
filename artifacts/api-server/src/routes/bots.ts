@@ -47,6 +47,8 @@ function toBotDetail(config: BotConfig, running: boolean, lastCheckAt: Date | nu
     tier1Min: config.tier1Min,
     tier2Min: config.tier2Min,
     tier3Min: config.tier3Min,
+    presaleTagline: config.presaleTagline ?? null,
+    presaleQuote: config.presaleQuote ?? null,
     running,
     lastCheckAt: lastCheckAt?.toISOString() ?? null,
     error: error ?? null,
@@ -72,6 +74,8 @@ function applyInput(body: ReturnType<typeof CreateBotBody.parse>): Partial<BotCo
   if (body.tier1Min !== undefined && body.tier1Min !== null) updates.tier1Min = body.tier1Min;
   if (body.tier2Min !== undefined && body.tier2Min !== null) updates.tier2Min = body.tier2Min;
   if (body.tier3Min !== undefined && body.tier3Min !== null) updates.tier3Min = body.tier3Min;
+  if (body.presaleTagline !== undefined) updates.presaleTagline = body.presaleTagline ?? null;
+  if (body.presaleQuote !== undefined) updates.presaleQuote = body.presaleQuote ?? null;
   return updates;
 }
 
