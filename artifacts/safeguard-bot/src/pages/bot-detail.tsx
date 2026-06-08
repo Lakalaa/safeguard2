@@ -469,6 +469,7 @@ export default function BotDetail() {
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
                     <option value="sosana">Sosana (default)</option>
+                    <option value="simple">Simple (clean)</option>
                     <option value="wave">Wave</option>
                     <option value="evm">EVM</option>
                     <option value="trending">Trending</option>
@@ -476,7 +477,7 @@ export default function BotDetail() {
                   </select>
                   <p className="text-xs text-muted-foreground">Choose how buy alerts look in Telegram.</p>
                 </div>
-                {watchedStyle === "presale" && (
+                {(watchedStyle === "presale" || watchedStyle === "simple") && (
                   <>
                     <div className="space-y-2">
                       <Label>Presale Tagline</Label>
