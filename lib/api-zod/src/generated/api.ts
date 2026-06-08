@@ -54,6 +54,8 @@ export const CreateBotBody = zod.object({
   tier1Min: zod.number().nullish(),
   tier2Min: zod.number().nullish(),
   tier3Min: zod.number().nullish(),
+  presaleTagline: zod.string().nullish(),
+  presaleQuote: zod.string().nullish(),
 });
 
 export const CreateBotResponse = zod.object({
@@ -81,6 +83,8 @@ export const CreateBotResponse = zod.object({
   tier1Min: zod.number(),
   tier2Min: zod.number(),
   tier3Min: zod.number(),
+  presaleTagline: zod.string().nullish(),
+  presaleQuote: zod.string().nullish(),
   running: zod.boolean(),
   lastCheckAt: zod.coerce.date().nullish(),
   error: zod.string().nullish(),
@@ -115,6 +119,8 @@ export const GetBotResponse = zod.object({
   tier1Min: zod.number(),
   tier2Min: zod.number(),
   tier3Min: zod.number(),
+  presaleTagline: zod.string().nullish(),
+  presaleQuote: zod.string().nullish(),
   running: zod.boolean(),
   lastCheckAt: zod.coerce.date().nullish(),
   error: zod.string().nullish(),
@@ -146,6 +152,8 @@ export const UpdateBotBody = zod.object({
   tier1Min: zod.number().nullish(),
   tier2Min: zod.number().nullish(),
   tier3Min: zod.number().nullish(),
+  presaleTagline: zod.string().nullish(),
+  presaleQuote: zod.string().nullish(),
 });
 
 export const UpdateBotResponse = zod.object({
@@ -173,6 +181,8 @@ export const UpdateBotResponse = zod.object({
   tier1Min: zod.number(),
   tier2Min: zod.number(),
   tier3Min: zod.number(),
+  presaleTagline: zod.string().nullish(),
+  presaleQuote: zod.string().nullish(),
   running: zod.boolean(),
   lastCheckAt: zod.coerce.date().nullish(),
   error: zod.string().nullish(),
