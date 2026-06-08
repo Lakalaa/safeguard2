@@ -132,17 +132,27 @@ export async function getDexScreenerData(tokenAddress: string, chainHint?: strin
     } catch (e) { logger.warn({ err: String(e) }, "GeckoTerminal fetch error"); return null; }
   }
 
-  // ── Fire ALL sources in parallel — first non-null wins ───────────────────────
-  // This is bulletproof: if DexScreener is rate-limited from Render's IP,
-  // GeckoTerminal still succeeds. First response with data is returned immediately.
-  async function raceFirst(promises: Promise<DexScreenerPair | null>[]): Promise<DexScreenerPair | null> {
+  // ── Fire ALL sources in parallel — prefer results with priceChange data ────────
+  // GeckoTerminal is faster but lacks priceChange.h24 — wait for DexScreener
+  // result (which has priceChange) before falling back to GeckoTerminal.
+  async function raceBest(promises: Promise<DexScreenerPair | null>[]): Promise<DexScreenerPair | null> {
     return new Promise((resolve) => {
       let pending = promises.length;
+      let bestSoFar: DexScreenerPair | null = null;
+      let resolved = false;
+      const tryFinish = () => {
+        if (--pending === 0 && !resolved) { resolved = true; resolve(bestSoFar); }
+      };
       for (const p of promises) {
         p.then((result) => {
-          if (result !== null) { resolve(result); }
-          else if (--pending === 0) { resolve(null); }
-        }).catch(() => { if (--pending === 0) resolve(null); });
+          if (!result) { tryFinish(); return; }
+          if (result.priceChange?.h24 !== undefined) {
+            if (!resolved) { resolved = true; resolve(result); }
+          } else {
+            if (!bestSoFar) bestSoFar = result;
+            tryFinish();
+          }
+        }).catch(() => tryFinish());
       }
     });
   }
@@ -179,7 +189,7 @@ export async function getDexScreenerData(tokenAddress: string, chainHint?: strin
     sources.push(tryGecko("ton")); // TON also uses non-EVM base58-like addresses
   }
 
-  return raceFirst(sources);
+  return raceBest(sources);
 }
 
 /** Diagnostic: test each data source individually and return status reports. */
