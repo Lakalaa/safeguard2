@@ -51,6 +51,8 @@ export const botConfigTable = pgTable("bot_config", {
   broadcastImageFileId: text("broadcast_image_file_id"), // Telegram file_id for broadcast image
   broadcastButtons: text("broadcast_buttons"),     // JSON: [{text, url}]
   broadcastInterval: integer("broadcast_interval"), // seconds; null = off
+  presaleTagline: text("presale_tagline"),   // tagline for presale alert style
+  presaleQuote: text("presale_quote"),       // bottom quote for presale alert style
   telegramUrl: text("telegram_url"),
   twitterUrl: text("twitter_url"),
   websiteUrl: text("website_url"),
