@@ -47,6 +47,14 @@ pool.query(`
 `).then(() => logger.info("custom_commands table ready"))
   .catch((err: unknown) => logger.error({ err }, "custom_commands migration failed"));
 
+// Auto-migrate: add presale columns to bot_config (safe to run every startup)
+pool.query(`
+  ALTER TABLE bot_config
+    ADD COLUMN IF NOT EXISTS presale_tagline TEXT,
+    ADD COLUMN IF NOT EXISTS presale_quote   TEXT
+`).then(() => logger.info("presale columns ready"))
+  .catch((err: unknown) => logger.error({ err }, "presale column migration failed"));
+
 botRegistry.autoStartAll().catch((err) => {
   logger.error({ err }, "Failed to auto-start bots");
 });
