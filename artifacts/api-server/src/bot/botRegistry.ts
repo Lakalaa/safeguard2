@@ -2,7 +2,7 @@ import TelegramBot from "node-telegram-bot-api";
 import https from "node:https";
 import { db } from "@workspace/db";
 import { botConfigTable, alertsTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sum, count } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getChainConfig, detectChainFromAddress } from "./chains/chainConfig";
 import { SolanaMonitor, type BuyEvent } from "./chains/solanaMonitor";
@@ -298,6 +298,10 @@ interface AlertParams {
   websiteUrl?: string | null;
   emojiPerTier: number;            // how many emojis per tier level (1×, 2×, 3×)
   trendingRank: number | null;     // position in DexScreener boosts leaderboard, null if not trending
+  presaleTagline?: string | null;   // tagline for presale alert style
+  presaleQuote?: string | null;     // bottom quote for presale alert style
+  totalRaised?: number | null;      // cumulative USD raised (presale style)
+  totalAlphas?: number | null;      // count of unique buyers (presale style)
   dexPaidScore: number | null;     // total boost amount ("Dex Paid" score), null if 0
 }
 
@@ -477,7 +481,7 @@ function tgApiJson(token: string, method: string, params: Record<string, unknown
 // Returns entities payload if alertEmoji has a custom emoji ID, else null (fall back to HTML)
 function buildAlertEntities(params: AlertParams): { text: string; entities: TgEntity[] } | null {
   // wave/evm/trending keep HTML; sosana always uses entities (animated emoji via custom_emoji entity)
-  if (params.alertStyle === "wave" || params.alertStyle === "evm" || params.alertStyle === "trending") return null;
+  if (params.alertStyle === "wave" || params.alertStyle === "evm" || params.alertStyle === "trending" || params.alertStyle === "presale") return null;
   return buildSosanaEntities(params);
 }
 
@@ -664,8 +668,41 @@ function buildTrendingKeyboard(params: AlertParams): TelegramBot.InlineKeyboardM
   return { inline_keyboard: rows };
 }
 
+// ── Presale style ─────────────────────────────────────────────────────────────
+function buildPresaleMessage(params: AlertParams): string {
+  const tagline = params.presaleTagline || "A smart move just happened.";
+  const quote = params.presaleQuote || '"Don't watch from the sidelines 👀"';
+  const totalRaised = params.totalRaised != null
+    ? `${Math.round(params.totalRaised).toLocaleString("en-US")}`
+    : "—";
+  const totalAlphas = params.totalAlphas != null
+    ? params.totalAlphas.toLocaleString("en-US")
+    : "—";
+  const _buyLink = parseBuyLink(params.buyUrl);
+  const buyLine = _buyLink
+    ? `\n\n🛒 <a href="${_buyLink.url}">Buy ${params.tokenSymbol}</a>`
+    : "";
+
+  return (
+    `🟢 <b>New Buy</b> 🟢\n\n` +
+    `${tagline}\n\n` +
+    `🪙 <b>Token:</b> ${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}\n` +
+    `💸 <b>Amount:</b> ${Math.round(params.amountUsd).toLocaleString("en-US")}\n` +
+    `💰 <b>Total Raised:</b> ${totalRaised}\n` +
+    `👥 <b>Total Alphas:</b> ${totalAlphas}\n\n` +
+    `${quote}` +
+    buyLine
+  );
+}
+
+function buildPresaleKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
+  const extraRows = buildCustomButtonRows(params).inline_keyboard;
+  return { inline_keyboard: [...extraRows] };
+}
+
 // ── Dispatcher ─────────────────────────────────────────────────────────────────
 function buildAlertMessage(params: AlertParams, emojiBarStr?: string): string {
+  if (params.alertStyle === "presale") return buildPresaleMessage(params);
   if (params.alertStyle === "trending") return buildTrendingMessage(params);
   if (params.alertStyle === "wave")     return buildWaveMessage(params, emojiBarStr);
   if (params.alertStyle === "evm")      return buildEvmMessage(params);
@@ -673,6 +710,7 @@ function buildAlertMessage(params: AlertParams, emojiBarStr?: string): string {
 }
 
 function buildAlertKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
+  if (params.alertStyle === "presale") return buildPresaleKeyboard(params);
   if (params.alertStyle === "trending") return buildTrendingKeyboard(params);
   if (params.alertStyle === "wave")     return buildWaveKeyboard(params);
   if (params.alertStyle === "evm")      return buildEvmKeyboard(params);
@@ -1408,6 +1446,24 @@ class BotRegistry {
       tier,
     });
 
+    // Compute presale stats (cumulative totals across all alerts for this bot)
+    let totalRaised: number | null = null;
+    let totalAlphas: number | null = null;
+    if ((config.alertStyle ?? "sosana") === "presale") {
+      try {
+        const [raised] = await db
+          .select({ total: sum(alertsTable.amountUsd) })
+          .from(alertsTable)
+          .where(eq(alertsTable.botConfigId, configId));
+        totalRaised = raised?.total != null ? Number(raised.total) : null;
+        const [alphas] = await db
+          .select({ cnt: count() })
+          .from(alertsTable)
+          .where(eq(alertsTable.botConfigId, configId));
+        totalAlphas = alphas?.cnt != null ? Number(alphas.cnt) : null;
+      } catch (_) { /* non-fatal */ }
+    }
+
     const alertParams: AlertParams = {
       tokenName: config.tokenName ?? dexData?.baseToken.name ?? "Token",
       tokenSymbol: config.tokenSymbol ?? dexData?.baseToken.symbol ?? "TKN",
@@ -1447,6 +1503,10 @@ class BotRegistry {
       websiteUrl: config.websiteUrl,
       trendingRank,
       dexPaidScore,
+      presaleTagline: config.presaleTagline ?? null,
+      presaleQuote: config.presaleQuote ?? null,
+      totalRaised,
+      totalAlphas,
     };
     const message = buildAlertMessage(alertParams);
     const keyboard = buildAlertKeyboard(alertParams);
