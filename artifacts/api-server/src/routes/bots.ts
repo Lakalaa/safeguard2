@@ -47,6 +47,15 @@ function toBotDetail(config: BotConfig, running: boolean, lastCheckAt: Date | nu
     tier1Min: config.tier1Min,
     tier2Min: config.tier2Min,
     tier3Min: config.tier3Min,
+    alertStyle: config.alertStyle ?? null,
+    alertEmoji: config.alertEmoji ?? null,
+    alertMediaFileId: config.alertMediaFileId ?? null,
+    alertMediaType: config.alertMediaType ?? null,
+    coBotToken: config.coBotToken ? `${config.coBotToken.slice(0,10)}...` : null,
+    websiteUrl: config.websiteUrl ?? null,
+    telegramUrl: config.telegramUrl ?? null,
+    twitterUrl: config.twitterUrl ?? null,
+    buyButtons: config.buyButtons ?? null,
     presaleTagline: config.presaleTagline ?? null,
     presaleQuote: config.presaleQuote ?? null,
     running,
@@ -74,6 +83,15 @@ function applyInput(body: ReturnType<typeof CreateBotBody.parse>): Partial<BotCo
   if (body.tier1Min !== undefined && body.tier1Min !== null) updates.tier1Min = body.tier1Min;
   if (body.tier2Min !== undefined && body.tier2Min !== null) updates.tier2Min = body.tier2Min;
   if (body.tier3Min !== undefined && body.tier3Min !== null) updates.tier3Min = body.tier3Min;
+  if (body.alertStyle !== undefined) updates.alertStyle = body.alertStyle ?? null;
+  if (body.alertEmoji !== undefined) updates.alertEmoji = body.alertEmoji ?? null;
+  if (body.alertMediaFileId !== undefined) updates.alertMediaFileId = body.alertMediaFileId ?? null;
+  if (body.alertMediaType !== undefined) updates.alertMediaType = body.alertMediaType ?? null;
+  if (body.coBotToken !== undefined) updates.coBotToken = body.coBotToken ?? null;
+  if (body.websiteUrl !== undefined) updates.websiteUrl = body.websiteUrl ?? null;
+  if (body.telegramUrl !== undefined) updates.telegramUrl = body.telegramUrl ?? null;
+  if (body.twitterUrl !== undefined) updates.twitterUrl = body.twitterUrl ?? null;
+  if (body.buyButtons !== undefined) updates.buyButtons = body.buyButtons ?? null;
   if (body.presaleTagline !== undefined) updates.presaleTagline = body.presaleTagline ?? null;
   if (body.presaleQuote !== undefined) updates.presaleQuote = body.presaleQuote ?? null;
   return updates;
