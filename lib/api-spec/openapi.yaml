@@ -226,6 +226,8 @@ components:
         tier1Min: { type: number, nullable: true }
         tier2Min: { type: number, nullable: true }
         tier3Min: { type: number, nullable: true }
+        presaleTagline: { type: string, nullable: true }
+        presaleQuote: { type: string, nullable: true }
 
     BotDetail:
       type: object
@@ -254,6 +256,8 @@ components:
         tier1Min: { type: number }
         tier2Min: { type: number }
         tier3Min: { type: number }
+        presaleTagline: { type: string, nullable: true }
+        presaleQuote: { type: string, nullable: true }
         running: { type: boolean }
         lastCheckAt: { type: string, format: date-time, nullable: true }
         error: { type: string, nullable: true }
