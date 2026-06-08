@@ -3,7 +3,7 @@ services:
     name: safeguard-bot
     runtime: node
     plan: free
-    buildCommand: pnpm install && pnpm --filter @workspace/api-server run build
+    buildCommand: pnpm install && BASE_PATH=/ pnpm --filter @workspace/safeguard-bot run build && pnpm --filter @workspace/api-server run build
     startCommand: node --enable-source-maps ./artifacts/api-server/dist/index.mjs
     healthCheckPath: /api/healthz
     envVars:
