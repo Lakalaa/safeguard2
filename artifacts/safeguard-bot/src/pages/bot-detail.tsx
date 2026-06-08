@@ -75,6 +75,9 @@ type FormValues = {
   tier1Min: number
   tier2Min: number
   tier3Min: number
+  alertStyle: string
+  presaleTagline: string
+  presaleQuote: string
 }
 
 export default function BotDetail() {
@@ -103,6 +106,7 @@ export default function BotDetail() {
 
   const form = useForm<FormValues>()
   const { register, handleSubmit, reset, setValue, watch } = form
+  const watchedStyle = watch("alertStyle")
 
   useEffect(() => {
     if (bot) {
@@ -124,6 +128,9 @@ export default function BotDetail() {
         tier1Min: bot.tier1Min ?? 100,
         tier2Min: bot.tier2Min ?? 500,
         tier3Min: bot.tier3Min ?? 1000,
+        alertStyle: bot.alertStyle ?? "sosana",
+        presaleTagline: bot.presaleTagline ?? "",
+        presaleQuote: bot.presaleQuote ?? "",
       })
     }
   }, [bot, reset])
@@ -455,6 +462,39 @@ export default function BotDetail() {
             <Card>
               <CardHeader><CardTitle className="text-sm">Alert Appearance</CardTitle></CardHeader>
               <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Alert Style</Label>
+                  <select
+                    {...register("alertStyle")}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <option value="sosana">Sosana (default)</option>
+                    <option value="wave">Wave</option>
+                    <option value="evm">EVM</option>
+                    <option value="trending">Trending</option>
+                    <option value="presale">Presale</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground">Choose how buy alerts look in Telegram.</p>
+                </div>
+                {watchedStyle === "presale" && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Presale Tagline</Label>
+                      <textarea
+                        {...register("presaleTagline")}
+                        rows={2}
+                        placeholder="A smart move just happened. The presale window won't stay open forever."
+                        className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      />
+                      <p className="text-xs text-muted-foreground">Shown below the header on each buy alert.</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Presale Quote</Label>
+                      <Input {...register("presaleQuote")} placeholder='"Don&apos;t watch from the sidelines 👀"' />
+                      <p className="text-xs text-muted-foreground">Italic quote line at the bottom of each alert.</p>
+                    </div>
+                  </>
+                )}
                 <div className="space-y-2">
                   <Label>Alert Image URL</Label>
                   <Input {...register("alertImageUrl")} placeholder="https://… (optional, sent as photo)" />
