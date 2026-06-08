@@ -491,7 +491,7 @@ function tgApiJson(token: string, method: string, params: Record<string, unknown
 // Returns entities payload if alertEmoji has a custom emoji ID, else null (fall back to HTML)
 function buildAlertEntities(params: AlertParams): { text: string; entities: TgEntity[] } | null {
   // wave/evm/trending keep HTML; sosana always uses entities (animated emoji via custom_emoji entity)
-  if (params.alertStyle === "wave" || params.alertStyle === "evm" || params.alertStyle === "trending" || params.alertStyle === "presale") return null;
+  if (params.alertStyle === "wave" || params.alertStyle === "evm" || params.alertStyle === "trending" || params.alertStyle === "presale" || params.alertStyle === "simple") return null;
   return buildSosanaEntities(params);
 }
 
@@ -714,8 +714,53 @@ function buildPresaleKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMa
   return { inline_keyboard: [...extraRows] };
 }
 
+
+function buildSimpleMessage(params: AlertParams): string {
+  const tagline = params.presaleTagline || "A smart move just happened.";
+  const quote = params.presaleQuote ?? "\"Don't watch from the sidelines 👀\"";
+  const emojiStr = params.alertEmoji || "🟢";
+  const emojiChar = emojiStr.match(/>[\s\S]+?<\/tg-emoji>/)?.[0]
+    ? (emojiStr.match(/>[\s\S]+?<\/tg-emoji>/)?.[0].slice(1,-11) ?? "🟢")
+    : emojiStr;
+  const totalRaised = params.totalRaised != null
+    ? "$" + Math.round(params.totalRaised).toLocaleString("en-US")
+    : "—";
+  const totalAlphas = params.totalAlphas != null
+    ? params.totalAlphas.toLocaleString("en-US")
+    : "—";
+  const positionLine = params.priceChangePct !== null
+    ? `\n📊 <b>Position:</b> ${params.priceChangePct >= 0 ? "+" : ""}${params.priceChangePct.toFixed(0)}%`
+    : "";
+  const mcapLine = params.marketCap !== null
+    ? `\n💎 <b>Mkt Cap:</b> ${Math.round(params.marketCap).toLocaleString("en-US")}`
+    : "";
+  const _buyLink = parseBuyLink(params.buyUrl);
+  const buyLine = _buyLink
+    ? `\n\n🛒 <a href="${_buyLink.url}">Buy ${params.tokenSymbol}</a>`
+    : "";
+
+  return (
+    `🟢 <b>New Buy</b> 🟢\n\n` +
+    `${tagline}\n\n` +
+    `${emojiChar} <b>Token:</b> ${params.tokensReceived.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${params.tokenSymbol}\n` +
+    `💰 <b>Amount:</b> ${Math.round(params.amountUsd).toLocaleString("en-US")}` +
+    positionLine +
+    mcapLine +
+    `\n💰 <b>Total Raised:</b> ${totalRaised}\n` +
+    `👥 <b>Total Alphas:</b> ${totalAlphas}\n\n` +
+    `${quote}` +
+    buyLine
+  );
+}
+
+function buildSimpleKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
+  const extraRows = buildCustomButtonRows(params).inline_keyboard;
+  return { inline_keyboard: [...extraRows] };
+}
+
 // ── Dispatcher ─────────────────────────────────────────────────────────────────
 function buildAlertMessage(params: AlertParams, emojiBarStr?: string): string {
+  if (params.alertStyle === "simple")   return buildSimpleMessage(params);
   if (params.alertStyle === "presale") return buildPresaleMessage(params);
   if (params.alertStyle === "trending") return buildTrendingMessage(params);
   if (params.alertStyle === "wave")     return buildWaveMessage(params, emojiBarStr);
@@ -724,6 +769,7 @@ function buildAlertMessage(params: AlertParams, emojiBarStr?: string): string {
 }
 
 function buildAlertKeyboard(params: AlertParams): TelegramBot.InlineKeyboardMarkup {
+  if (params.alertStyle === "simple")   return buildSimpleKeyboard(params);
   if (params.alertStyle === "presale") return buildPresaleKeyboard(params);
   if (params.alertStyle === "trending") return buildTrendingKeyboard(params);
   if (params.alertStyle === "wave")     return buildWaveKeyboard(params);
