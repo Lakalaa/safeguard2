@@ -258,6 +258,15 @@ components:
         tier3Min: { type: number }
         presaleTagline: { type: string, nullable: true }
         presaleQuote: { type: string, nullable: true }
+        coBotToken: { type: string, nullable: true }
+        websiteUrl: { type: string, nullable: true }
+        telegramUrl: { type: string, nullable: true }
+        twitterUrl: { type: string, nullable: true }
+        buyButtons: { type: string, nullable: true }
+        broadcastText: { type: string, nullable: true }
+        broadcastInterval: { type: integer, nullable: true }
+        broadcastImageFileId: { type: string, nullable: true }
+        broadcastButtons: { type: string, nullable: true }
         running: { type: boolean }
         lastCheckAt: { type: string, format: date-time, nullable: true }
         error: { type: string, nullable: true }
