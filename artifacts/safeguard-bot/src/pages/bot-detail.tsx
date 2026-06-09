@@ -78,6 +78,9 @@ type FormValues = {
   alertStyle: string
   presaleTagline: string
   presaleQuote: string
+  broadcastText: string
+  broadcastInterval: number
+  broadcastImageFileId: string
 }
 
 export default function BotDetail() {
@@ -131,6 +134,9 @@ export default function BotDetail() {
         alertStyle: bot.alertStyle ?? "sosana",
         presaleTagline: bot.presaleTagline ?? "",
         presaleQuote: bot.presaleQuote ?? "",
+        broadcastText: bot.broadcastText ?? "",
+        broadcastInterval: bot.broadcastInterval ?? 0,
+        broadcastImageFileId: bot.broadcastImageFileId ?? "",
       })
     }
   }, [bot, reset])
@@ -539,6 +545,33 @@ export default function BotDetail() {
               </CardContent>
             </Card>
 
+
+            <Card>
+              <CardHeader><CardTitle className="text-sm">📢 Broadcast Message</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-xs text-muted-foreground">Sends a recurring message to the group on a timer. Leave blank to disable.</p>
+                <div className="space-y-2">
+                  <Label>Message Text</Label>
+                  <textarea
+                    {...register("broadcastText")}
+                    rows={4}
+                    placeholder="Enter your broadcast message (HTML supported: <b>bold</b>, <i>italic</i>, <a href='...'>link</a>)"
+                    className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Interval (seconds)</Label>
+                    <Input {...register("broadcastInterval", { valueAsNumber: true })} type="number" min={60} placeholder="e.g. 3600 = every hour" />
+                    <p className="text-xs text-muted-foreground">0 = disabled. Min 60 sec.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Image File ID (optional)</Label>
+                    <Input {...register("broadcastImageFileId")} placeholder="Telegram file_id" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
             <div className="flex justify-end">
               <Button type="submit" disabled={updateBot.isPending}>
                 {updateBot.isPending ? "Saving…" : "Save Settings"}
