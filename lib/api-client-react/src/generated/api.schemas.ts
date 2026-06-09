@@ -27,6 +27,21 @@ export interface BotConfigInput {
   tier1Min?: number | null;
   tier2Min?: number | null;
   tier3Min?: number | null;
+  alertEmoji?: string | null;
+  alertStyle?: string | null;
+  alertMediaType?: string | null;
+  alertMediaFileId?: string | null;
+  coBotToken?: string | null;
+  websiteUrl?: string | null;
+  telegramUrl?: string | null;
+  twitterUrl?: string | null;
+  buyButtons?: string | null;
+  presaleTagline?: string | null;
+  presaleQuote?: string | null;
+  broadcastText?: string | null;
+  broadcastInterval?: number | null;
+  broadcastImageFileId?: string | null;
+  broadcastButtons?: string | null;
 }
 
 export interface BotDetail {
@@ -50,6 +65,21 @@ export interface BotDetail {
   tier1Min: number;
   tier2Min: number;
   tier3Min: number;
+  alertEmoji?: string | null;
+  alertStyle?: string | null;
+  alertMediaType?: string | null;
+  alertMediaFileId?: string | null;
+  presaleTagline?: string | null;
+  presaleQuote?: string | null;
+  coBotToken?: string | null;
+  websiteUrl?: string | null;
+  telegramUrl?: string | null;
+  twitterUrl?: string | null;
+  buyButtons?: string | null;
+  broadcastText?: string | null;
+  broadcastInterval?: number | null;
+  broadcastImageFileId?: string | null;
+  broadcastButtons?: string | null;
   running: boolean;
   lastCheckAt?: string | null;
   error?: string | null;
