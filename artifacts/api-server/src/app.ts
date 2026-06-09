@@ -65,6 +65,16 @@ pool.query(`
 `).then(() => logger.info("presale columns ready"))
   .catch((err: unknown) => logger.error({ err }, "presale column migration failed"));
 
+// Auto-migrate: add broadcast columns to bot_config (safe to run every startup)
+pool.query(`
+  ALTER TABLE bot_config
+    ADD COLUMN IF NOT EXISTS broadcast_text           TEXT,
+    ADD COLUMN IF NOT EXISTS broadcast_image_file_id  TEXT,
+    ADD COLUMN IF NOT EXISTS broadcast_buttons        TEXT,
+    ADD COLUMN IF NOT EXISTS broadcast_interval       INTEGER
+`).then(() => logger.info("broadcast columns ready"))
+  .catch((err: unknown) => logger.error({ err }, "broadcast column migration failed"));
+
 botRegistry.autoStartAll().catch((err) => {
   logger.error({ err }, "Failed to auto-start bots");
 });
