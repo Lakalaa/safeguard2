@@ -58,6 +58,10 @@ function toBotDetail(config: BotConfig, running: boolean, lastCheckAt: Date | nu
     buyButtons: config.buyButtons ?? null,
     presaleTagline: config.presaleTagline ?? null,
     presaleQuote: config.presaleQuote ?? null,
+    broadcastText: config.broadcastText ?? null,
+    broadcastInterval: config.broadcastInterval ?? null,
+    broadcastImageFileId: config.broadcastImageFileId ?? null,
+    broadcastButtons: config.broadcastButtons ?? null,
     running,
     lastCheckAt: lastCheckAt?.toISOString() ?? null,
     error: error ?? null,
@@ -94,6 +98,10 @@ function applyInput(body: ReturnType<typeof CreateBotBody.parse>): Partial<BotCo
   if (body.buyButtons !== undefined) updates.buyButtons = body.buyButtons ?? null;
   if (body.presaleTagline !== undefined) updates.presaleTagline = body.presaleTagline ?? null;
   if (body.presaleQuote !== undefined) updates.presaleQuote = body.presaleQuote ?? null;
+  if (body.broadcastText !== undefined) updates.broadcastText = body.broadcastText ?? null;
+  if (body.broadcastInterval !== undefined) updates.broadcastInterval = body.broadcastInterval ?? null;
+  if (body.broadcastImageFileId !== undefined) updates.broadcastImageFileId = body.broadcastImageFileId ?? null;
+  if (body.broadcastButtons !== undefined) updates.broadcastButtons = body.broadcastButtons ?? null;
   return updates;
 }
 
