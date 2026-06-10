@@ -622,7 +622,7 @@ export function createCommandBot(token: string): TelegramBot {
   bot.onText(/^\/filter(?:@\w+)?(?:\s+(.+))?$/is, async (msg, match) => {
     const chatId = String(msg.chat.id);
     const userId = msg.from?.id;
-    if (!userId || !await isAdmin(bot, chatId, userId)) {
+    if (!userId || (!isAnonymousAdmin(msg) && !await isAdmin(bot, chatId, userId))) {
       await bot.sendMessage(chatId, `🔒 Only admins can manage custom commands.`);
       return;
     }
@@ -642,13 +642,11 @@ export function createCommandBot(token: string): TelegramBot {
         return;
       }
       const lines = cmds.map(c => {
-        const btns = c.buttonsJson
-          ? (JSON.parse(c.buttonsJson) as { text: string }[]).map(b => b.text).join(", ")
-          : "no buttons";
-        return `• <code>/${c.commandName}</code> — ${btns}`;
+        const preview = c.messageText.slice(0, 60) + (c.messageText.length > 60 ? "…" : "");
+        return `• <code>/${c.commandName}</code> — ${preview}`;
       });
       await bot.sendMessage(chatId,
-        `📋 <b>Custom Commands (${cmds.length})</b>\n\n${lines.join("\n")}\n\nUsers type <code>/name</code> or just <code>name</code>`,
+        `📋 <b>Custom Commands (${cmds.length})</b>\n\n${lines.join("\n")}\n\nUsers type <code>/name</code> or just <code>name</code>\nTo delete: <code>/filter delete name</code>`,
         { parse_mode: "HTML" });
       return;
     }
