@@ -845,7 +845,7 @@ export function createCommandBot(token: string): TelegramBot {
   bot.onText(/^\/setup(@\S+)?$/, async (msg) => {
     if (!msg.from) return;
     const chatId = String(msg.chat.id);
-    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) { await bot.sendMessage(chatId, "⛔ Only group admins can use this command.").catch(() => null); return; }
     const config = await getOrCreate(chatId, msg.chat.title);
     const { running } = botRegistry.getStatus(config.id);
     await sendSettings(bot, chatId, config, running);
@@ -855,7 +855,7 @@ export function createCommandBot(token: string): TelegramBot {
   bot.onText(/^\/start(@\S+)?$/, async (msg) => {
     if (!msg.from) return;
     const chatId = String(msg.chat.id);
-    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) { await bot.sendMessage(chatId, "⛔ Only group admins can use this command.").catch(() => null); return; }
     const config = await getOrCreate(chatId, msg.chat.title);
     if (!config.tokenAddress) {
       await bot.sendMessage(chatId, "⚠️ No token configured yet. Use /add first.");
@@ -876,7 +876,7 @@ export function createCommandBot(token: string): TelegramBot {
   bot.onText(/^\/stop(@\S+)?$/, async (msg) => {
     if (!msg.from) return;
     const chatId = String(msg.chat.id);
-    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) { await bot.sendMessage(chatId, "⛔ Only group admins can use this command.").catch(() => null); return; }
     const config = await getOrCreate(chatId, msg.chat.title);
     await botRegistry.stop(config.id);
     await bot.sendMessage(chatId, "⏹ Monitoring stopped.");
@@ -886,7 +886,7 @@ export function createCommandBot(token: string): TelegramBot {
   bot.onText(/^\/raid(@\S+)?$/, async (msg) => {
     if (!msg.from) return;
     const chatId = String(msg.chat.id);
-    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) { await bot.sendMessage(chatId, "⛔ Only group admins can use this command.").catch(() => null); return; }
     const config = await getOrCreate(chatId, msg.chat.title);
     await sendRaidMenu(bot, chatId, config);
   });
@@ -895,7 +895,7 @@ export function createCommandBot(token: string): TelegramBot {
   bot.onText(/^\/vote(@\S+)?$/, async (msg) => {
     if (!msg.from) return;
     const chatId = String(msg.chat.id);
-    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) { await bot.sendMessage(chatId, "⛔ Only group admins can use this command.").catch(() => null); return; }
     const config = await getOrCreate(chatId, msg.chat.title);
     await sendVoteMenu(bot, chatId, config);
   });
@@ -904,7 +904,7 @@ export function createCommandBot(token: string): TelegramBot {
   bot.onText(/^\/post(@\S+)?$/, async (msg) => {
     if (!msg.from) return;
     const chatId = String(msg.chat.id);
-    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) { await bot.sendMessage(chatId, "⛔ Only group admins can use this command.").catch(() => null); return; }
     pendingState.set(chatId, { step: "await_post_text" });
     await bot.sendMessage(chatId,
       `📨 <b>Post a Message</b>\n\nSend the message text you want to post to the group.\n\n` +
@@ -920,7 +920,7 @@ export function createCommandBot(token: string): TelegramBot {
   bot.onText(/^\/status(@\S+)?$/, async (msg) => {
     if (!msg.from) return;
     const chatId = String(msg.chat.id);
-    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) { await bot.sendMessage(chatId, "⛔ Only group admins can use this command.").catch(() => null); return; }
     const config = await getOrCreate(chatId, msg.chat.title);
     const { running } = botRegistry.getStatus(config.id);
     await sendSettings(bot, chatId, config, running);
@@ -1013,7 +1013,7 @@ export function createCommandBot(token: string): TelegramBot {
   bot.onText(/^\/testalert(?:@\S+)?$/, async (msg) => {
     if (!msg.from) return;
     const chatId = String(msg.chat.id);
-    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) { await bot.sendMessage(chatId, "⛔ Only group admins can use this command.").catch(() => null); return; }
     const config = await getOrCreate(chatId, msg.chat.title);
     const emoji = config.alertEmoji || "\uD83D\uDFE2";
     const base = Math.max(1, config.emojiPerTier ?? 5);
@@ -1035,7 +1035,7 @@ export function createCommandBot(token: string): TelegramBot {
   bot.onText(/^\/diag(@\S+)?$/, async (msg) => {
     if (!msg.from) return;
     const chatId = String(msg.chat.id);
-    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) { await bot.sendMessage(chatId, "⛔ Only group admins can use this command.").catch(() => null); return; }
     const config = await getOrCreate(chatId, msg.chat.title);
     if (!config.tokenAddress) {
       await bot.sendMessage(chatId, "⚠️ No token address saved yet. Use /add first.", { parse_mode: "HTML" });
@@ -1684,7 +1684,7 @@ Send <code>clear</code> to remove the buy link.`,
     const chatId = String(msg.chat.id);
 
     // In groups: admin only. In private: always respond.
-    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) { await bot.sendMessage(chatId, "⛔ Only group admins can use this command.").catch(() => null); return; }
 
     const state = pendingState.get(chatId);
     if (state?.step !== "await_sticker") return; // Only act when /setmoji was just used
@@ -1717,7 +1717,7 @@ Send <code>clear</code> to remove the buy link.`,
     const state = pendingState.get(chatId);
 
     // In groups, only process if admin
-    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) return;
+    if (msg.chat.type !== "private" && !(await isAdmin(bot, chatId, msg.from.id))) { await bot.sendMessage(chatId, "⛔ Only group admins can use this command.").catch(() => null); return; }
 
     // ── Custom emoji paste: admin sends inline animated emoji → ask to confirm ──
     {
