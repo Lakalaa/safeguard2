@@ -592,7 +592,6 @@ export function createCommandBot(token: string): TelegramBot {
         },
         until_date: until,
       });
-      await bot.deleteMessage(chatId, msg.message_id).catch(() => null);
       const name = msg.from.first_name ?? "User";
       await bot.sendMessage(chatId,
         `🔇 <b>${name}</b> has been muted for 24 hours.\n\n⚠️ Spreading FUD (fake, scam) is not allowed in this group.`,
