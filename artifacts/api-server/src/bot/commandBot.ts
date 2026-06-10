@@ -1687,7 +1687,7 @@ Send <code>clear</code> to remove the buy link.`,
     const chatId = String(msg.chat.id);
 
     // In groups: admin only. In private: always respond.
-    if (msg.chat.type !== "private" && !isAnonymousAdmin(msg) && !(await isAdmin(bot, chatId, msg.from.id))) { await bot.sendMessage(chatId, "⛔ Only group admins can use this command.").catch(() => null); return; }
+    if (msg.chat.type !== "private" && !isAnonymousAdmin(msg) && !(await isAdmin(bot, chatId, msg.from.id))) return;
 
     const state = pendingState.get(chatId);
     if (state?.step !== "await_sticker") return; // Only act when /setmoji was just used
@@ -1720,7 +1720,7 @@ Send <code>clear</code> to remove the buy link.`,
     const state = pendingState.get(chatId);
 
     // In groups, only process if admin
-    if (msg.chat.type !== "private" && !isAnonymousAdmin(msg) && !(await isAdmin(bot, chatId, msg.from.id))) { await bot.sendMessage(chatId, "⛔ Only group admins can use this command.").catch(() => null); return; }
+    if (msg.chat.type !== "private" && !isAnonymousAdmin(msg) && !(await isAdmin(bot, chatId, msg.from.id))) return;
 
     // ── Custom emoji paste: admin sends inline animated emoji → ask to confirm ──
     {
