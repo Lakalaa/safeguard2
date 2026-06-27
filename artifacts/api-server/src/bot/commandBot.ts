@@ -1706,33 +1706,6 @@ Send <code>clear</code> to remove the buy link.`,
     // In groups, only process if admin
     if (msg.chat.type !== "private" && !isAnonymousAdmin(msg) && !(await isAdmin(bot, chatId, msg.from.id))) return;
 
-    // ── Custom emoji paste: admin sends inline animated emoji → ask to confirm ──
-    {
-      const customEnt = msg.entities?.find((e: any) => e.type === "custom_emoji");
-      if (!pendingState.get(chatId) && customEnt && (customEnt as any).custom_emoji_id && msg.text) {
-        const emojiId = (customEnt as any).custom_emoji_id as string;
-        const baseChar = msg.text.slice(customEnt.offset, customEnt.offset + customEnt.length) || "🔥";
-        const emoji = `<tg-emoji emoji-id="${emojiId}">${baseChar}</tg-emoji>`;
-        const callbackData = `setmoji_custom:${emojiId}:${baseChar}`;
-        if (Buffer.byteLength(callbackData, "utf8") <= 64) {
-          await bot.sendMessage(chatId,
-            `${emoji} Set this as your alert emoji?`,
-            {
-              parse_mode: "HTML",
-              reply_to_message_id: msg.message_id,
-              reply_markup: {
-                inline_keyboard: [[
-                  { text: "✅ Yes", callback_data: callbackData },
-                  { text: "❌ No", callback_data: "setmoji_cancel" },
-                ]],
-              },
-            },
-          );
-        }
-        return;
-      }
-    }
-
     // ── Smart fallback: if state was lost (server restart) but message looks
     //    like a token address, use the stored chain from DB and process it ──
     if (!state && msg.text) {
