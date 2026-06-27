@@ -71,7 +71,6 @@ type FormValues = {
   screenerUrl: string
   buyUrl: string
   trendingUrl: string
-  alertEmoji: string
   emojiPerTier: number
   tier1Min: number
   tier2Min: number
@@ -128,7 +127,6 @@ export default function BotDetail() {
         screenerUrl: bot.screenerUrl ?? "",
         buyUrl: bot.buyUrl ?? "",
         trendingUrl: bot.trendingUrl ?? "",
-        alertEmoji: bot.alertEmoji ?? "🟢",
         emojiPerTier: bot.emojiPerTier ?? 4,
         tier1Min: bot.tier1Min ?? 100,
         tier2Min: bot.tier2Min ?? 500,
@@ -509,13 +507,6 @@ export default function BotDetail() {
                   <Input {...register("alertImageUrl")} placeholder="https://… (optional, sent as photo)" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Alert Emoji</Label>
-                    <Input {...register("alertEmoji")} placeholder="🟢" maxLength={8} />
-                    <p className="text-xs text-muted-foreground">
-                      Standard emoji only (e.g. 🟢 🔥 💎). Custom Telegram premium emoji won't work unless the account that created this bot has Telegram Premium.
-                    </p>
-                  </div>
                   <div className="space-y-2">
                     <Label>Emojis per Tier</Label>
                     <Input {...register("emojiPerTier", { valueAsNumber: true })} type="number" min={1} max={20} />
