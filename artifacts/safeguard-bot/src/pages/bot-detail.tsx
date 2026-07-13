@@ -83,6 +83,22 @@ type FormValues = {
   broadcastImageFileId: string
 }
 
+function getDexBuyUrl(chain: string, ca: string): string {
+  const c = (chain ?? "").toLowerCase()
+  if (c === "solana") return `https://raydium.io/swap/?inputCurrency=sol&outputCurrency=${ca}&fixed=in`
+  if (c === "bsc") return `https://pancakeswap.finance/swap?outputCurrency=${ca}`
+  if (c === "base") return `https://app.uniswap.org/#/swap?chain=base&outputCurrency=${ca}`
+  if (c === "arbitrum") return `https://app.uniswap.org/#/swap?chain=arbitrum&outputCurrency=${ca}`
+  if (c === "polygon") return `https://app.uniswap.org/#/swap?chain=polygon&outputCurrency=${ca}`
+  if (c === "optimism") return `https://app.uniswap.org/#/swap?chain=optimism&outputCurrency=${ca}`
+  if (c === "avalanche") return `https://traderjoexyz.com/avalanche/trade?outputCurrency=${ca}`
+  return `https://app.uniswap.org/#/swap?outputCurrency=${ca}`
+}
+
+function isContractAddress(val: string): boolean {
+  return /^0x[0-9a-fA-F]{40}$/.test(val) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(val)
+}
+
 export default function BotDetail() {
   const params = useParams<{ id: string }>()
   const id = parseInt(params.id ?? "0")
@@ -110,6 +126,8 @@ export default function BotDetail() {
   const form = useForm<FormValues>()
   const { register, handleSubmit, reset, setValue, watch } = form
   const watchedStyle = watch("alertStyle")
+  const watchedBuyUrl = watch("buyUrl")
+  const watchedChain = watch("chain")
 
   useEffect(() => {
     if (bot) {
@@ -159,9 +177,19 @@ export default function BotDetail() {
       if (tokenInfo.chainId) setValue("chain", tokenInfo.chainId)
       if (tokenInfo.dexscreenerUrl) setValue("screenerUrl", tokenInfo.dexscreenerUrl)
       if (tokenInfo.dextoolsUrl) setValue("dextUrl", tokenInfo.dextoolsUrl)
+      if (tokenInfo.chainId && watchedAddress && !watch("buyUrl")) {
+        setValue("buyUrl", getDexBuyUrl(tokenInfo.chainId, watchedAddress))
+      }
       toast({ title: "Token found", description: `${tokenInfo.name} (${tokenInfo.symbol}) auto-filled.` })
     }
   }, [tokenInfo, setValue, toast])
+
+  useEffect(() => {
+    const val = (watchedBuyUrl ?? "").trim()
+    if (val && isContractAddress(val)) {
+      setValue("buyUrl", getDexBuyUrl(watchedChain || "ethereum", val))
+    }
+  }, [watchedBuyUrl, watchedChain, setValue])
 
   function invalidateBot() {
     queryClient.invalidateQueries({ queryKey: getGetBotQueryKey(id) })
