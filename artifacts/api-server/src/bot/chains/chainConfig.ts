@@ -160,7 +160,12 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
 };
 
 export function getChainConfig(chainId: string): ChainConfig | null {
-  return CHAIN_CONFIGS[chainId.toLowerCase()] ?? null;
+  const key = chainId.toLowerCase().replace(/[\-_\s]/g, "");
+  // Exact match first
+  if (CHAIN_CONFIGS[key]) return CHAIN_CONFIGS[key];
+  // Fuzzy: any "robin*" variant → robinhood config
+  if (key.startsWith("robin")) return CHAIN_CONFIGS["robinhood"] ?? null;
+  return null;
 }
 
 export function detectChainFromAddress(address: string): string {
