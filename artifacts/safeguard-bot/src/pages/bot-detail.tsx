@@ -49,6 +49,7 @@ const CHAIN_LABELS: Record<string, string> = {
   polygon: "Polygon",
   avalanche: "Avalanche",
   optimism: "Optimism",
+  robinwood: "Robinwood",
 }
 
 function formatUsd(n: number) {
@@ -92,6 +93,7 @@ function getDexBuyUrl(chain: string, ca: string): string {
   if (c === "polygon") return `https://app.uniswap.org/#/swap?chain=polygon&outputCurrency=${ca}`
   if (c === "optimism") return `https://app.uniswap.org/#/swap?chain=optimism&outputCurrency=${ca}`
   if (c === "avalanche") return `https://traderjoexyz.com/avalanche/trade?outputCurrency=${ca}`
+  if (c === "robinwood") return `https://robinwood.io/swap?outputCurrency=${ca}`
   return `https://app.uniswap.org/#/swap?outputCurrency=${ca}`
 }
 
@@ -495,7 +497,7 @@ export default function BotDetail() {
                 </div>
                 <div className="space-y-2">
                   <Label>Chain</Label>
-                  <Input {...register("chain")} placeholder="Auto-detected (solana / ethereum / bsc / base…)" />
+                  <Input {...register("chain")} placeholder="Auto-detected (solana / ethereum / bsc / base / robinwood…)" />
                 </div>
                 <div className="space-y-2">
                   <Label>Minimum Buy (USD)</Label>
