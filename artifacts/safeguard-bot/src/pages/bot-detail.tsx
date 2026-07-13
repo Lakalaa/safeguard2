@@ -177,19 +177,31 @@ export default function BotDetail() {
       if (tokenInfo.chainId) setValue("chain", tokenInfo.chainId)
       if (tokenInfo.dexscreenerUrl) setValue("screenerUrl", tokenInfo.dexscreenerUrl)
       if (tokenInfo.dextoolsUrl) setValue("dextUrl", tokenInfo.dextoolsUrl)
-      if (tokenInfo.chainId && watchedAddress && !watch("buyUrl")) {
-        setValue("buyUrl", getDexBuyUrl(tokenInfo.chainId, watchedAddress))
-      }
       toast({ title: "Token found", description: `${tokenInfo.name} (${tokenInfo.symbol}) auto-filled.` })
     }
   }, [tokenInfo, setValue, toast])
 
   useEffect(() => {
     const val = (watchedBuyUrl ?? "").trim()
+    const addr = (watchedAddress ?? "").trim()
+
+    // Pasted a raw contract address → convert to chain-appropriate DEX swap URL
     if (val && isContractAddress(val)) {
       setValue("buyUrl", getDexBuyUrl(watchedChain || "ethereum", val))
+      return
     }
-  }, [watchedBuyUrl, watchedChain, setValue])
+
+    // Pasted / stored a website URL + token address is known → append CA as query param
+    if (val.startsWith("http") && addr.length > 30) {
+      if (val.includes(addr)) return // CA already in the URL, nothing to do
+      // Strip any old outputCurrency / ca param, then append fresh one
+      const base = val
+        .replace(/([?&])outputCurrency=[^&]*/g, "$1").replace(/([?&])ca=[^&]*/g, "$1")
+        .replace(/[?&]+$/, "")
+      const sep = base.includes("?") ? "&" : "?"
+      setValue("buyUrl", `${base}${sep}outputCurrency=${addr}`)
+    }
+  }, [watchedBuyUrl, watchedAddress, watchedChain, setValue])
 
   function invalidateBot() {
     queryClient.invalidateQueries({ queryKey: getGetBotQueryKey(id) })
@@ -558,7 +570,7 @@ export default function BotDetail() {
                   [
                     ["dextUrl", "DexTools URL", "https://dextools.io/… (auto-filled)"],
                     ["screenerUrl", "DexScreener URL", "https://dexscreener.com/… (auto-filled)"],
-                    ["buyUrl", "Buy URL", "Your preferred exchange — Raydium, Jupiter, Uniswap, or any link"],
+                    ["buyUrl", "Buy URL", "Paste your website URL — token CA will be appended automatically"],
                     ["trendingUrl", "Trending URL", "https://…"],
                   ] as const
                 ).map(([field, label, placeholder]) => (
