@@ -166,10 +166,13 @@ class BuyAlertBot {
       const dexData = await getDexScreenerData(config.tokenAddress);
       if (!config.chain && dexData?.chainId) chainId = dexData.chainId;
 
-      const chainConfig = getChainConfig(chainId);
+      let chainConfig = getChainConfig(chainId);
+      // Fallback: EVM address → ethereum; Solana address → solana
       if (!chainConfig) {
-        this.lastError = `Unsupported chain: ${chainId}`;
-        return { running: false, error: this.lastError };
+        const isEvm = /^0x[0-9a-fA-F]{40}$/.test(config.tokenAddress ?? "");
+        const fallback = isEvm ? "ethereum" : "solana";
+        req.log?.warn({ chainId, fallback }, `Unknown chain "${chainId}" — falling back to ${fallback}`);
+        chainConfig = getChainConfig(fallback)!;
       }
 
       // Save detected chain back to DB
