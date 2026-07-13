@@ -162,9 +162,9 @@ class BuyAlertBot {
       // Detect chain — prefer config.chain, otherwise detect from address or DexScreener
       let chainId = config.chain ?? detectChainFromAddress(config.tokenAddress);
 
-      // If DexScreener knows this token, use its chain
+      // Use DexScreener chain only if the user hasn't explicitly set one
       const dexData = await getDexScreenerData(config.tokenAddress);
-      if (dexData?.chainId) chainId = dexData.chainId;
+      if (!config.chain && dexData?.chainId) chainId = dexData.chainId;
 
       const chainConfig = getChainConfig(chainId);
       if (!chainConfig) {
