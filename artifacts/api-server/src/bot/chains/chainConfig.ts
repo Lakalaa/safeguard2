@@ -160,11 +160,18 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
 };
 
 export function getChainConfig(chainId: string): ChainConfig | null {
-  const key = chainId.toLowerCase().replace(/[\-_\s]/g, "");
-  // Exact match first
+  if (!chainId) return null;
+  // Normalize: lowercase, strip spaces/dashes/underscores
+  const key = chainId.toLowerCase().replace(/[-_\s]/g, "");
+  // 1. Exact match
   if (CHAIN_CONFIGS[key]) return CHAIN_CONFIGS[key];
-  // Fuzzy: any "robin*" variant → robinhood config
+  // 2. Robin* family (robinhood, robinwood, robinhoodeth, robin-hood …)
   if (key.startsWith("robin")) return CHAIN_CONFIGS["robinhood"] ?? null;
+  // 3. Partial match — pick the first config whose id starts with the key or vice-versa
+  const partial = Object.values(CHAIN_CONFIGS).find(
+    c => c.id.startsWith(key) || key.startsWith(c.id)
+  );
+  if (partial) return partial;
   return null;
 }
 
