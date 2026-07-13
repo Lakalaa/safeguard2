@@ -132,6 +132,19 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     defaultBuyUrl: "https://robinwood.io/swap?outputCurrency={address}",
     defaultBuyLabel: "Buy",
   },
+  // alias — "robinhood" resolves to the same chain
+  robinhood: {
+    id: "robinhood",
+    name: "Robinhood",
+    nativeCurrency: "RBW",
+    nativeCoinGeckoId: "robinwood",
+    explorerTx: "https://robinwood.io/tx/{tx}",
+    explorerAddress: "https://robinwood.io/address/{address}",
+    type: "evm",
+    rpcHttp: "https://rpc.robinwood.io",
+    defaultBuyUrl: "https://robinwood.io/swap?outputCurrency={address}",
+    defaultBuyLabel: "Buy",
+  },
   ton: {
     id: "ton",
     name: "TON",
