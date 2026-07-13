@@ -120,6 +120,18 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     defaultBuyUrl: "https://app.uniswap.org/swap?chain=optimism&outputCurrency={address}",
     defaultBuyLabel: "Buy",
   },
+  robinwood: {
+    id: "robinwood",
+    name: "Robinwood",
+    nativeCurrency: "RBW",
+    nativeCoinGeckoId: "robinwood",
+    explorerTx: "https://robinwood.io/tx/{tx}",
+    explorerAddress: "https://robinwood.io/address/{address}",
+    type: "evm",
+    rpcHttp: "https://rpc.robinwood.io",
+    defaultBuyUrl: "https://robinwood.io/swap?outputCurrency={address}",
+    defaultBuyLabel: "Buy",
+  },
   ton: {
     id: "ton",
     name: "TON",
