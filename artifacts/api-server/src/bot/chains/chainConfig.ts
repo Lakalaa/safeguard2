@@ -128,7 +128,8 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     explorerTx: "https://robinwood.io/tx/{tx}",
     explorerAddress: "https://robinwood.io/address/{address}",
     type: "evm",
-    rpcHttp: "https://rpc.robinwood.io",
+    rpcHttp: "https://rpc.mainnet.chain.robinhood.com",
+    rpcHttpFallback: "https://rpc.mainnet.chain.robinhood.com",
     defaultBuyUrl: "https://robinwood.io/swap?outputCurrency={address}",
     defaultBuyLabel: "Buy",
   },
@@ -141,7 +142,8 @@ export const CHAIN_CONFIGS: Record<string, ChainConfig> = {
     explorerTx: "https://robinwood.io/tx/{tx}",
     explorerAddress: "https://robinwood.io/address/{address}",
     type: "evm",
-    rpcHttp: "https://rpc.robinwood.io",
+    rpcHttp: "https://rpc.mainnet.chain.robinhood.com",
+    rpcHttpFallback: "https://rpc.mainnet.chain.robinhood.com",
     defaultBuyUrl: "https://robinwood.io/swap?outputCurrency={address}",
     defaultBuyLabel: "Buy",
   },
@@ -179,3 +181,4 @@ export function detectChainFromAddress(address: string): string {
   if (/^0x[0-9a-fA-F]{40}$/.test(address)) return "ethereum";
   return "solana";
 }
+
